@@ -9,10 +9,7 @@ import numpy as np
 import tensorflow as tf
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
-from tensorflow.keras.optimizers import Adam
 
 
 def parse_args():
@@ -94,12 +91,6 @@ def make_env(gym_id, seed, idx, capture_video, run_name):
     return thunk
 
 
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
-
-
 class Agent(tf.keras.Model):
     def __init__(self, envs):
         super().__init__()
@@ -123,9 +114,6 @@ class Agent(tf.keras.Model):
         logits, values = self.base_model(inputs)
         return logits, values
 
-    def get_value(self, x):
-        return self.critic(x)
-
     def logp(self, logits, action):
         """
         Returns:
@@ -138,22 +126,18 @@ class Agent(tf.keras.Model):
         return logp
 
     def entropy(self, logits=None):
-        """
-            Entropy term for more randomness which means more exploration \n
-            Based on OpenAI Baselines implementation
-        """
+        """Entropy term for more exploration based on OpenAI Baseline openai/baselines/common/distributions.py"""
         a0 = logits - tf.reduce_max(logits, axis=-1, keepdims=True)
         exp_a0 = tf.exp(a0)
         z0 = tf.reduce_sum(exp_a0, axis=-1, keepdims=True)
         p0 = exp_a0 / z0
-        entropy = tf.reduce_sum(p0 * (tf.math.log(z0) - a0), axis=-1)
-        return entropy
+        return tf.reduce_sum(p0 * (tf.math.log(z0) - a0), axis=-1)
 
     def get_action_and_value(self, obs, actions=None):
         logits, values = self.predict(obs)
         if actions is None:
             actions = tf.squeeze(tf.random.categorical(logits, 1), axis=-1)
-        return actions, self.logp(logits, actions), self.entropy(logits), values
+        return np.squeeze(actions), np.squeeze(self.logp(logits, actions)), np.squeeze(self.entropy(logits)), np.squeeze(values)
 
 
 if __name__ == "__main__":
@@ -199,14 +183,6 @@ if __name__ == "__main__":
     dones = []
     values = []
 
-
-    obs = tf.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape)
-    actions = tf.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape)
-    logprobs = tf.zeros((args.num_steps, args.num_envs))
-    rewards = tf.zeros((args.num_steps, args.num_envs))
-    dones = tf.zeros((args.num_steps, args.num_envs))
-    values = tf.zeros((args.num_steps, args.num_envs))
-
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
@@ -233,7 +209,7 @@ if __name__ == "__main__":
             logprobs.append(logprob)
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            next_obs, reward, done, info = envs.step(action)
             rewards.append(reward)
 
             for item in info:
@@ -252,7 +228,7 @@ if __name__ == "__main__":
         values = np.array(values, dtype=np.float32)
 
         # bootstrap value if not done
-        _, _, _, next_value = agent.agent.get_action_and_value(next_obs)
+        _, _, _, next_value = agent.get_action_and_value(next_obs)
         advantages = np.zeros_like(rewards)
         lastgaelam = 0
         for t in reversed(range(args.num_steps)):
@@ -266,7 +242,6 @@ if __name__ == "__main__":
             advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
 
         returns = advantages + values
-        # todo normalize advantages?
 
         # flatten the batch
         b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
@@ -285,47 +260,50 @@ if __name__ == "__main__":
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
 
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
+                # get new prediciton of logits, entropy and value
+                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
-                ratio = logratio.exp()
+                ratio = tf.exp(logratio)
 
-                with torch.no_grad():
-                    # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                    # old_approx_kl = (-logratio).mean()
-                    approx_kl = ((ratio - 1) - logratio).mean()
-                    clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
+                # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                approx_kl = tf.reduce_mean((ratio - 1) - logratio)
+                # clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()] # todo whatdid this tell us?
 
+                # get advantages
                 mb_advantages = b_advantages[mb_inds]
                 if args.norm_adv:
                     mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
 
                 # Policy loss
-                pg_loss1 = -mb_advantages * ratio
-                pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
-                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+                min_adv = tf.where(mb_advantages > 0, (1 + args.clip_coef) * mb_advantages, (1 - args.clip_coef) * mb_advantages)
+                pg_loss = -tf.reduce_mean(tf.math.minimum(ratio * mb_advantages, min_adv))
 
                 # Value loss
-                newvalue = newvalue.view(-1)
                 if args.clip_vloss:
-                    v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
-                    v_clipped = b_values[mb_inds] + torch.clamp(
+                    v_loss_unclipped = tf.square(newvalue - b_returns[mb_inds])
+                    v_clipped = b_values[mb_inds] + tf.clip_by_value(
                         newvalue - b_values[mb_inds],
                         -args.clip_coef,
                         args.clip_coef,
                     )
-                    v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
-                    v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                    v_loss = 0.5 * v_loss_max.mean()
+                    v_loss_clipped = tf.square(v_clipped - b_returns[mb_inds])
+                    v_loss_max = tf.math.maximum(v_loss_unclipped, v_loss_clipped)
+                    v_loss = 0.5 * tf.reduce_mean(v_loss_max)
                 else:
-                    v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+                    v_loss = 0.5 * tf.reduce_mean(tf.square(newvalue - b_returns[mb_inds]))
 
-                entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                entropy_loss = -tf.reduce_mean(entropy)
 
-                optimizer.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
-                optimizer.step()
+                # take gradient and backpropagate
+                with tf.GradientTape() as tape:
+                    losses = pg_loss + args.ent_coef * entropy_loss + v_loss * args.vf_coef
+
+
+                trainable_variables = agent.trainable_variables  # take all trainable variables into account
+                grads = tape.gradient(losses, trainable_variables)
+                grads, grad_norm = tf.clip_by_global_norm(grads, args.max_grad_norm)  # clip gradients for slight updates
+
+                optimizer.apply_gradients(zip(grads, trainable_variables))
 
             if args.target_kl is not None:
                 if approx_kl > args.target_kl:
