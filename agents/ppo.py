@@ -7,7 +7,6 @@ import collections
 import gym
 import numpy as np
 import tensorflow as tf
-from torch.utils.tensorboard import SummaryWriter
 from tensorflow.keras.optimizers.schedules import LearningRateSchedule
 
 
@@ -111,7 +110,7 @@ def make_env(gym_id, seed, idx, capture_video, run_name):
     return thunk
 
 
-class Agent(tf.keras.Model):
+class PPOAgent(tf.keras.Model):
     def __init__(self, envs):
         super().__init__()
 
@@ -218,13 +217,13 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
-    writer = SummaryWriter(f"runs/{run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    writer = tf.summary.create_file_writer(f"runs/{run_name}")
+    #file_writer.add_text(
+    #    "hyperparameters",
+    #    "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    #)
 
-    # TRY NOT TO MODIFY: seeding
+    # seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
     tf.random.set_seed(args.seed)
@@ -235,7 +234,7 @@ if __name__ == "__main__":
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = Agent(envs)
+    agent = PPOAgent(envs)
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -251,118 +250,119 @@ if __name__ == "__main__":
         learning_rate = args.learning_rate
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate, epsilon=1e-5)
 
-    for update in range(1, num_updates + 1):
+    with writer.as_default():
+        for update in range(1, num_updates + 1):
 
-        # ALGO Logic: Storage setup
-        obs = []
-        actions = []
-        logprobs = []
-        rewards = []
-        dones = []
-        values = []
+            # ALGO Logic: Storage setup
+            obs = []
+            actions = []
+            logprobs = []
+            rewards = []
+            dones = []
+            values = []
 
-        for step in range(0, args.num_steps):
-            global_step += 1 * args.num_envs
-            obs.append(next_obs)
-            dones.append(done)
+            for step in range(0, args.num_steps):
+                global_step += 1 * args.num_envs
+                obs.append(next_obs)
+                dones.append(done)
 
-            # ALGO LOGIC: action logic
-            action, logprob, _, value = agent.get_action_and_value(next_obs)
-            values.append(tf.reshape(value, [-1]))
-            actions.append(action)
-            logprobs.append(logprob)
+                # ALGO LOGIC: action logic
+                action, logprob, _, value = agent.get_action_and_value(next_obs)
+                values.append(tf.reshape(value, [-1]))
+                actions.append(action)
+                logprobs.append(logprob)
 
-            # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, done, info = envs.step(action)
-            rewards.append(reward)
+                # TRY NOT TO MODIFY: execute the game and log data.
+                next_obs, reward, done, info = envs.step(action)
+                rewards.append(reward)
 
-            for item in info:
-                if "episode" in item.keys():
-                    print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
-                    break
+                for item in info:
+                    if "episode" in item.keys():
+                        print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
+                        tf.summary.scalar("charts/episodic_return", item["episode"]["r"], global_step)
+                        tf.summary.scalar("charts/episodic_length", item["episode"]["l"], global_step)
+                        break
 
-        # convert data to numpy array
-        obs = np.array(obs, dtype=np.float32)
-        actions = np.array(actions, dtype=np.int32)
-        logprobs = np.array(logprobs, dtype=np.float32)
-        rewards = np.array(rewards, dtype=np.float32)
-        dones = np.array(dones, dtype=np.bool)
-        values = np.array(values, dtype=np.float32)
+            # convert data to numpy array
+            obs = np.array(obs, dtype=np.float32)
+            actions = np.array(actions, dtype=np.int32)
+            logprobs = np.array(logprobs, dtype=np.float32)
+            rewards = np.array(rewards, dtype=np.float32)
+            dones = np.array(dones, dtype=np.bool)
+            values = np.array(values, dtype=np.float32)
 
-        # bootstrap value if not done
-        _, _, _, next_value = agent.get_action_and_value(next_obs)
-        advantages = np.zeros_like(rewards)
-        lastgaelam = 0
-        for t in reversed(range(args.num_steps)):
-            if t == args.num_steps - 1:
-                nextnonterminal = 1.0 - done
-                nextvalues = next_value
-            else:
-                nextnonterminal = 1.0 - dones[t + 1]
-                nextvalues = values[t + 1]
-            delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
-            advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
+            # bootstrap value if not done
+            _, _, _, next_value = agent.get_action_and_value(next_obs)
+            advantages = np.zeros_like(rewards)
+            lastgaelam = 0
+            for t in reversed(range(args.num_steps)):
+                if t == args.num_steps - 1:
+                    nextnonterminal = 1.0 - done
+                    nextvalues = next_value
+                else:
+                    nextnonterminal = 1.0 - dones[t + 1]
+                    nextvalues = values[t + 1]
+                delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
+                advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
 
-        returns = advantages + values
+            returns = advantages + values
 
-        # flatten the batch
-        b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
-        b_logprobs = logprobs.reshape(-1)
-        b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
-        b_advantages = advantages.reshape(-1)
-        b_returns = returns.reshape(-1)
-        b_values = values.reshape(-1)
+            # flatten the batch
+            b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
+            b_logprobs = logprobs.reshape(-1)
+            b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
+            b_advantages = advantages.reshape(-1)
+            b_returns = returns.reshape(-1)
+            b_values = values.reshape(-1)
 
-        # Optimizaing the policy and value network
-        b_inds = np.arange(args.batch_size)
-        clipfracs = []
-        for epoch in range(args.update_epochs):
-            np.random.shuffle(b_inds)
-            for start in range(0, args.batch_size, args.minibatch_size):
-                end = start + args.minibatch_size
-                mb_inds = b_inds[start:end]
+            # Optimizaing the policy and value network
+            b_inds = np.arange(args.batch_size)
+            clipfracs = []
+            for epoch in range(args.update_epochs):
+                np.random.shuffle(b_inds)
+                for start in range(0, args.batch_size, args.minibatch_size):
+                    end = start + args.minibatch_size
+                    mb_inds = b_inds[start:end]
 
-                # take gradient and backpropagate
-                with tf.GradientTape() as tape:
-                    loss_info = agent.get_loss(
-                        b_obs[mb_inds],
-                        b_actions[mb_inds],
-                        b_returns[mb_inds],
-                        b_advantages[mb_inds],
-                        b_values[mb_inds],
-                        b_logprobs[mb_inds],
-                        args.clip_coef,
-                        args.norm_adv,
-                        args.ent_coef,
-                        args.vf_coef,
-                    )
+                    # take gradient and backpropagate
+                    with tf.GradientTape() as tape:
+                        loss_info = agent.get_loss(
+                            b_obs[mb_inds],
+                            b_actions[mb_inds],
+                            b_returns[mb_inds],
+                            b_advantages[mb_inds],
+                            b_values[mb_inds],
+                            b_logprobs[mb_inds],
+                            args.clip_coef,
+                            args.norm_adv,
+                            args.ent_coef,
+                            args.vf_coef,
+                        )
 
-                trainable_variables = agent.base_model.trainable_variables  # take all trainable variables into account
-                grads = tape.gradient(loss_info.total_loss, trainable_variables)
-                grads, grad_norm = tf.clip_by_global_norm(grads, args.max_grad_norm)  # clip gradients for slight updates
+                    trainable_variables = agent.base_model.trainable_variables  # take all trainable variables into account
+                    grads = tape.gradient(loss_info.total_loss, trainable_variables)
+                    grads, grad_norm = tf.clip_by_global_norm(grads, args.max_grad_norm)  # clip gradients for slight updates
 
-                optimizer.apply_gradients(zip(grads, trainable_variables))
+                    optimizer.apply_gradients(zip(grads, trainable_variables))
 
-            if args.target_kl is not None:
-                if loss_info.approx_kl > args.target_kl:
-                    break
+                if args.target_kl is not None:
+                    if loss_info.approx_kl > args.target_kl:
+                        break
 
-        y_pred, y_true = b_values, b_returns
-        var_y = np.var(y_true)
-        explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
+            y_pred, y_true = b_values, b_returns
+            var_y = np.var(y_true)
+            explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
-        # TRY NOT TO MODIFY: record rewards for plotting purposes
-        # writer.add_scalar("charts/learning_rate", optimizer._decayed_lr(np.float32), global_step)
-        #writer.add_scalar("losses/value_loss", loss_info.v_loss.item(), global_step)
-        #writer.add_scalar("losses/policy_loss", loss_info.pg_loss.item(), global_step)
-        #writer.add_scalar("losses/entropy", loss_info.entropy_loss.item(), global_step)
-        #writer.add_scalar("losses/approx_kl", loss_info.approx_kl.item(), global_step)
-        #writer.add_scalar("losses/clipfrac", np.mean(loss_info.clipfracs), global_step)
-        #writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        print("SPS:", int(global_step / (time.time() - start_time)))
-        #writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+            # TRY NOT TO MODIFY: record rewards for plotting purposes
+            tf.summary.scalar("charts/learning_rate", optimizer._decayed_lr(np.float32), global_step)
+            tf.summary.scalar("losses/value_loss", loss_info.v_loss, global_step)
+            tf.summary.scalar("losses/policy_loss", loss_info.pg_loss, global_step)
+            tf.summary.scalar("losses/entropy", loss_info.entropy_loss, global_step)
+            tf.summary.scalar("losses/approx_kl", loss_info.approx_kl, global_step)
+            tf.summary.scalar("losses/clipfrac", np.mean(loss_info.clipfracs), global_step)
+            tf.summary.scalar("losses/explained_variance", explained_var, global_step)
+            print("SPS:", int(global_step / (time.time() - start_time)))
+            tf.summary.scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
-    envs.close()
-    writer.close()
+        writer.flush()
+        envs.close()
