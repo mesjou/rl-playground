@@ -267,7 +267,7 @@ if __name__ == "__main__":
 
                 # calculate approx_kl http://joschu.net/blog/kl-approx.html
                 approx_kl = tf.reduce_mean((ratio - 1) - logratio)
-                # clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()] # todo whatdid this tell us?
+                clipfracs = tf.reduce_mean(tf.greater(tf.abs(ratio - 1.0), args.clip_coef))
 
                 # get advantages
                 mb_advantages = b_advantages[mb_inds]

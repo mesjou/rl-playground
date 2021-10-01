@@ -1,5 +1,11 @@
 # rl-playground
 
+Simple single file implementation of PPO with TensorFlow 2.0
+
+I created the repo to understand PPO and make all of the basic functionality available in 
+one single file to quickly grasp the concepts.
+I plan to extend the algorithms in hte future with additional other RL algos.
+
 ## Get started
 
 Prerequisites (Example for MacOS only):
@@ -24,3 +30,7 @@ python3 -m pip install -r requirements.txt
 
 I have been heavily relying on the `cleanrl` repo:
 * https://github.com/vwxyzjn/cleanrl
+
+Additional resources:
+* https://github.com/tensorflow/agents
+* https://github.com/jw1401/PPO-Tensorflow-2.0
