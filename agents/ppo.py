@@ -3,13 +3,23 @@ import os
 import random
 import time
 from distutils.util import strtobool
-
+import collections
 import gym
 import numpy as np
 import tensorflow as tf
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
+
+
+PPOLossInfo = collections.namedtuple('PPOLossInfo', (
+    'total_loss',
+    'v_loss',
+    'pg_loss',
+    'entropy_loss',
+    'approx_kl',
+    'clipfracs',
+))
 
 
 def parse_args():
@@ -134,10 +144,57 @@ class Agent(tf.keras.Model):
         return tf.reduce_sum(p0 * (tf.math.log(z0) - a0), axis=-1)
 
     def get_action_and_value(self, obs, actions=None):
-        logits, values = self.predict(obs)
+        logits, values = self.base_model(obs)
         if actions is None:
             actions = tf.squeeze(tf.random.categorical(logits, 1), axis=-1)
-        return np.squeeze(actions), np.squeeze(self.logp(logits, actions)), np.squeeze(self.entropy(logits)), np.squeeze(values)
+        return np.squeeze(actions), tf.squeeze(self.logp(logits, actions)), self.entropy(logits), np.squeeze(values)
+
+    def get_loss(self, obs, actions, returns, advantages, values, old_log_probs, clip_coef, norm_adv, ent_coef, vf_coef):
+        # get new prediciton of logits, entropy and value
+        _, new_log_prob, entropy, newvalue = self.get_action_and_value(obs, actions)
+
+        logratio = new_log_prob - old_log_probs
+        ratio = tf.exp(logratio)
+
+        # calculate approx_kl http://joschu.net/blog/kl-approx.html
+        approx_kl = tf.reduce_mean((ratio - 1) - logratio)
+        clipfracs = tf.reduce_mean(tf.cast(tf.greater(tf.abs(ratio - 1.0), clip_coef), tf.int32))
+
+        # get advantages
+        if norm_adv:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        # Policy loss
+        min_adv = tf.where(advantages > 0, (1 + clip_coef) * advantages,
+                           (1 - clip_coef) * advantages)
+        pg_loss = -tf.reduce_mean(tf.math.minimum(ratio * advantages, min_adv))
+
+        # Value loss
+        if args.clip_vloss:
+            v_loss_unclipped = tf.square(newvalue - returns)
+            v_clipped = values + tf.clip_by_value(
+                newvalue - values,
+                -clip_coef,
+                clip_coef,
+            )
+            v_loss_clipped = tf.square(v_clipped - returns)
+            v_loss_max = tf.math.maximum(v_loss_unclipped, v_loss_clipped)
+            v_loss = 0.5 * tf.reduce_mean(v_loss_max)
+        else:
+            v_loss = 0.5 * tf.reduce_mean(tf.square(newvalue - returns))
+
+        entropy_loss = -tf.reduce_mean(entropy)
+
+        total_loss = pg_loss + ent_coef * entropy_loss + v_loss * vf_coef
+
+        return PPOLossInfo(
+            total_loss=total_loss,
+            v_loss=v_loss,
+            pg_loss=pg_loss,
+            entropy_loss=entropy_loss,
+            approx_kl=approx_kl,
+            clipfracs=clipfracs,
+        )
 
 
 if __name__ == "__main__":
@@ -260,53 +317,29 @@ if __name__ == "__main__":
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
 
-                # get new prediciton of logits, entropy and value
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
-                logratio = newlogprob - b_logprobs[mb_inds]
-                ratio = tf.exp(logratio)
-
-                # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                approx_kl = tf.reduce_mean((ratio - 1) - logratio)
-                clipfracs = tf.reduce_mean(tf.greater(tf.abs(ratio - 1.0), args.clip_coef))
-
-                # get advantages
-                mb_advantages = b_advantages[mb_inds]
-                if args.norm_adv:
-                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
-
-                # Policy loss
-                min_adv = tf.where(mb_advantages > 0, (1 + args.clip_coef) * mb_advantages, (1 - args.clip_coef) * mb_advantages)
-                pg_loss = -tf.reduce_mean(tf.math.minimum(ratio * mb_advantages, min_adv))
-
-                # Value loss
-                if args.clip_vloss:
-                    v_loss_unclipped = tf.square(newvalue - b_returns[mb_inds])
-                    v_clipped = b_values[mb_inds] + tf.clip_by_value(
-                        newvalue - b_values[mb_inds],
-                        -args.clip_coef,
-                        args.clip_coef,
-                    )
-                    v_loss_clipped = tf.square(v_clipped - b_returns[mb_inds])
-                    v_loss_max = tf.math.maximum(v_loss_unclipped, v_loss_clipped)
-                    v_loss = 0.5 * tf.reduce_mean(v_loss_max)
-                else:
-                    v_loss = 0.5 * tf.reduce_mean(tf.square(newvalue - b_returns[mb_inds]))
-
-                entropy_loss = -tf.reduce_mean(entropy)
-
                 # take gradient and backpropagate
                 with tf.GradientTape() as tape:
-                    losses = pg_loss + args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                    loss_info = agent.get_loss(
+                        b_obs[mb_inds],
+                        b_actions[mb_inds],
+                        b_returns[mb_inds],
+                        b_advantages[mb_inds],
+                        b_values[mb_inds],
+                        b_logprobs[mb_inds],
+                        args.clip_coef,
+                        args.norm_adv,
+                        args.ent_coef,
+                        args.vf_coef,
+                    )
 
-
-                trainable_variables = agent.trainable_variables  # take all trainable variables into account
-                grads = tape.gradient(losses, trainable_variables)
+                trainable_variables = agent.base_model.trainable_variables  # take all trainable variables into account
+                grads = tape.gradient(loss_info.total_loss, trainable_variables)
                 grads, grad_norm = tf.clip_by_global_norm(grads, args.max_grad_norm)  # clip gradients for slight updates
 
                 optimizer.apply_gradients(zip(grads, trainable_variables))
 
             if args.target_kl is not None:
-                if approx_kl > args.target_kl:
+                if loss_info.approx_kl > args.target_kl:
                     break
 
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
@@ -315,11 +348,11 @@ if __name__ == "__main__":
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
-        writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-        writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
-        writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-        writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-        writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
+        writer.add_scalar("losses/value_loss", loss_info.v_loss.item(), global_step)
+        writer.add_scalar("losses/policy_loss", loss_info.pg_loss.item(), global_step)
+        writer.add_scalar("losses/entropy", loss_info.entropy_loss.item(), global_step)
+        writer.add_scalar("losses/approx_kl", loss_info.approx_kl.item(), global_step)
+        writer.add_scalar("losses/clipfrac", np.mean(loss_info.clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
