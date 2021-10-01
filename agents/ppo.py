@@ -7,8 +7,6 @@ import collections
 import gym
 import numpy as np
 import tensorflow as tf
-import torch
-import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -147,7 +145,7 @@ class Agent(tf.keras.Model):
         logits, values = self.base_model(obs)
         if actions is None:
             actions = tf.squeeze(tf.random.categorical(logits, 1), axis=-1)
-        return np.squeeze(actions), tf.squeeze(self.logp(logits, actions)), self.entropy(logits), np.squeeze(values)
+        return np.squeeze(actions), tf.squeeze(self.logp(logits, actions)), self.entropy(logits), tf.squeeze(values)
 
     def get_loss(self, obs, actions, returns, advantages, values, old_log_probs, clip_coef, norm_adv, ent_coef, vf_coef):
         # get new prediciton of logits, entropy and value
@@ -159,7 +157,6 @@ class Agent(tf.keras.Model):
         # calculate approx_kl http://joschu.net/blog/kl-approx.html
         approx_kl = tf.reduce_mean((ratio - 1) - logratio)
         clipfracs = tf.reduce_mean(tf.cast(tf.greater(tf.abs(ratio - 1.0), clip_coef), tf.int32))
-
         # get advantages
         if norm_adv:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
@@ -261,7 +258,7 @@ if __name__ == "__main__":
 
             # ALGO LOGIC: action logic
             action, logprob, _, value = agent.get_action_and_value(next_obs)
-            values.append(value.flatten())
+            values.append(tf.reshape(value, [-1]))
             actions.append(action)
             logprobs.append(logprob)
 
@@ -342,7 +339,7 @@ if __name__ == "__main__":
                 if loss_info.approx_kl > args.target_kl:
                     break
 
-        y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
+        y_pred, y_true = b_values, b_returns
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
