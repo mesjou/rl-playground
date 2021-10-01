@@ -8,6 +8,7 @@ import gym
 import numpy as np
 import tensorflow as tf
 from torch.utils.tensorboard import SummaryWriter
+from tensorflow.keras.optimizers.schedules import LearningRateSchedule
 
 
 PPOLossInfo = collections.namedtuple('PPOLossInfo', (
@@ -18,6 +19,17 @@ PPOLossInfo = collections.namedtuple('PPOLossInfo', (
     'approx_kl',
     'clipfracs',
 ))
+
+
+class MyLRSchedule(LearningRateSchedule):
+    def __init__(self, initial_learning_rate, num_updates):
+        super(LearningRateSchedule, self).__init__()
+        self.initial_learning_rate = initial_learning_rate
+        self.num_updates = num_updates
+
+    def __call__(self, step):
+        frac = 1.0 - (step - 1.0) / self.num_updates
+        return frac * self.initial_learning_rate
 
 
 def parse_args():
@@ -115,6 +127,7 @@ class Agent(tf.keras.Model):
         first_layer = tf.keras.layers.Dense(64, name="1st_actor_layer", activation='tanh')(inputs)
         second_layer = tf.keras.layers.Dense(64, name="2nd_actor_layer", activation='tanh')(first_layer)
         logits_out = tf.keras.layers.Dense(self.act_size, activation=None, name="action_logits")(second_layer)
+        # todo add normalization to output layers
 
         self.base_model = tf.keras.Model(inputs, [logits_out, value_out])
 
@@ -123,11 +136,7 @@ class Agent(tf.keras.Model):
         return logits, values
 
     def logp(self, logits, action):
-        """
-        Returns:
-            logp based on the action drawn from prob-distribution \n
-            indexes in the logp_all with one_hot
-        """
+        """Get the log-probability based on the action drawn from prob-distribution"""
         logp_all = tf.nn.log_softmax(logits)
         one_hot = tf.one_hot(action, depth=self.act_size)
         logp = tf.reduce_sum(one_hot * logp_all, axis=-1)
@@ -227,15 +236,6 @@ if __name__ == "__main__":
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = Agent(envs)
-    optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate, epsilon=1e-5)
-
-    # ALGO Logic: Storage setup
-    obs = []
-    actions = []
-    logprobs = []
-    rewards = []
-    dones = []
-    values = []
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -244,12 +244,22 @@ if __name__ == "__main__":
     done = np.zeros(args.num_envs)
     num_updates = args.total_timesteps // args.batch_size
 
+    # anneal learning rate if instructed to do so
+    if args.anneal_lr:
+        learning_rate = MyLRSchedule(args.learning_rate, num_updates)
+    else:
+        learning_rate = args.learning_rate
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate, epsilon=1e-5)
+
     for update in range(1, num_updates + 1):
-        # Annealing the rate if instructed to do so.
-        if args.anneal_lr:
-            frac = 1.0 - (update - 1.0) / num_updates
-            lrnow = frac * args.learning_rate
-            optimizer.param_groups[0]["lr"] = lrnow
+
+        # ALGO Logic: Storage setup
+        obs = []
+        actions = []
+        logprobs = []
+        rewards = []
+        dones = []
+        values = []
 
         for step in range(0, args.num_steps):
             global_step += 1 * args.num_envs
@@ -344,15 +354,15 @@ if __name__ == "__main__":
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
-        writer.add_scalar("losses/value_loss", loss_info.v_loss.item(), global_step)
-        writer.add_scalar("losses/policy_loss", loss_info.pg_loss.item(), global_step)
-        writer.add_scalar("losses/entropy", loss_info.entropy_loss.item(), global_step)
-        writer.add_scalar("losses/approx_kl", loss_info.approx_kl.item(), global_step)
-        writer.add_scalar("losses/clipfrac", np.mean(loss_info.clipfracs), global_step)
-        writer.add_scalar("losses/explained_variance", explained_var, global_step)
+        # writer.add_scalar("charts/learning_rate", optimizer._decayed_lr(np.float32), global_step)
+        #writer.add_scalar("losses/value_loss", loss_info.v_loss.item(), global_step)
+        #writer.add_scalar("losses/policy_loss", loss_info.pg_loss.item(), global_step)
+        #writer.add_scalar("losses/entropy", loss_info.entropy_loss.item(), global_step)
+        #writer.add_scalar("losses/approx_kl", loss_info.approx_kl.item(), global_step)
+        #writer.add_scalar("losses/clipfrac", np.mean(loss_info.clipfracs), global_step)
+        #writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
-        writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        #writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     envs.close()
     writer.close()
