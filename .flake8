@@ -1,0 +1,7 @@
+[flake8]
+max-line-length = 120
+max-complexity = 10
+ignore = D
+inline-quotes = "
+import-order-style = smarkets
+min_python_version = 3.7.0

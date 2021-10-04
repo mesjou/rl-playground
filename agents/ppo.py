@@ -1,31 +1,21 @@
 import argparse
+import collections
 import os
 import random
 import time
 from distutils.util import strtobool
-import collections
+
 import gym
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.optimizers.schedules import LearningRateSchedule
 
-
-PPOLossInfo = collections.namedtuple('PPOLossInfo', (
-    'total_loss',
-    'v_loss',
-    'pg_loss',
-    'entropy_loss',
-    'approx_kl',
-    'clipfracs',
-))
+PPOLossInfo = collections.namedtuple(
+    "PPOLossInfo", ("total_loss", "v_loss", "pg_loss", "entropy_loss", "approx_kl", "clipfracs",)
+)
 
 
-ActionValues = collections.namedtuple('ActionValues', (
-    'actions',
-    'values',
-    'logits',
-    'entropy',
-))
+ActionValues = collections.namedtuple("ActionValues", ("actions", "values", "logits", "entropy",))
 
 
 class MyLRSchedule(LearningRateSchedule):
@@ -42,59 +32,84 @@ class MyLRSchedule(LearningRateSchedule):
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
-    parser.add_argument('--exp-name', type=str, default=os.path.basename(__file__).rstrip(".py"),
-        help='the name of this experiment')
-    parser.add_argument('--gym-id', type=str, default="CartPole-v1",
-        help='the id of the gym environment')
-    parser.add_argument('--learning-rate', type=float, default=2.5e-4,
+    parser.add_argument(
+        '--exp-name', type=str, default=os.path.basename(__file__).rstrip(".py"), help='the name of this experiment')
+    parser.add_argument(
+        '--gym-id', type=str, default="CartPole-v1", help='the id of the gym environment')
+    parser.add_argument(
+        '--learning-rate', type=float, default=2.5e-4,
         help='the learning rate of the optimizer')
-    parser.add_argument('--seed', type=int, default=1,
+    parser.add_argument(
+        '--seed', type=int, default=1,
         help='seed of the experiment')
-    parser.add_argument('--total-timesteps', type=int, default=200000,
+    parser.add_argument(
+        '--total-timesteps', type=int, default=200000,
         help='total timesteps of the experiments')
-    parser.add_argument('--torch-deterministic', type=lambda x:bool(strtobool(x)), default=True, nargs='?', const=True,
+    parser.add_argument(
+        '--torch-deterministic', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True,
         help='if toggled, `torch.backends.cudnn.deterministic=False`')
-    parser.add_argument('--cuda', type=lambda x:bool(strtobool(x)), default=True, nargs='?', const=True,
+    parser.add_argument(
+        '--cuda', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True,
         help='if toggled, cuda will be enabled by default')
-    parser.add_argument('--track', type=lambda x:bool(strtobool(x)), default=False, nargs='?', const=True,
+    parser.add_argument(
+        '--track', type=lambda x: bool(strtobool(x)), default=False, nargs='?', const=True,
         help='if toggled, this experiment will be tracked with Weights and Biases')
-    parser.add_argument('--wandb-project-name', type=str, default="cleanRL",
+    parser.add_argument(
+        '--wandb-project-name', type=str, default="cleanRL",
         help="the wandb's project name")
-    parser.add_argument('--wandb-entity', type=str, default=None,
+    parser.add_argument(
+        '--wandb-entity', type=str, default=None,
         help="the entity (team) of wandb's project")
-    parser.add_argument('--capture-video', type=lambda x:bool(strtobool(x)), default=False, nargs='?', const=True,
+    parser.add_argument(
+        '--capture-video', type=lambda x: bool(strtobool(x)), default=False, nargs='?', const=True,
         help='weather to capture videos of the agent performances (check out `videos` folder)')
 
     # Algorithm specific arguments
-    parser.add_argument('--num-envs', type=int, default=4,
+    parser.add_argument(
+        '--num-envs', type=int, default=4,
         help='the number of parallel game environments')
-    parser.add_argument('--num-steps', type=int, default=128,
+    parser.add_argument(
+        '--num-steps', type=int, default=128,
         help='the number of steps to run in each environment per policy rollout')
-    parser.add_argument('--anneal-lr', type=lambda x:bool(strtobool(x)), default=False, nargs='?', const=True, # todo cahnge default to true
+    parser.add_argument(
+        '--anneal-lr', type=lambda x: bool(strtobool(x)), default=False, nargs='?', const=True,
+        # todo cahnge default to true
         help="Toggle learning rate annealing for policy and value networks")
-    parser.add_argument('--gae', type=lambda x:bool(strtobool(x)), default=True, nargs='?', const=True,
+    parser.add_argument(
+        '--gae', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True,
         help='Use GAE for advantage computation')
-    parser.add_argument('--gamma', type=float, default=0.99,
+    parser.add_argument(
+        '--gamma', type=float, default=0.99,
         help='the discount factor gamma')
-    parser.add_argument('--gae-lambda', type=float, default=0.95,
+    parser.add_argument(
+        '--gae-lambda', type=float, default=0.95,
         help='the lambda for the general advantage estimation')
-    parser.add_argument('--num-minibatches', type=int, default=4,
+    parser.add_argument(
+        '--num-minibatches', type=int, default=4,
         help='the number of mini-batches')
-    parser.add_argument('--update-epochs', type=int, default=4,
+    parser.add_argument(
+        '--update-epochs', type=int, default=4,
         help="the K epochs to update the policy")
-    parser.add_argument('--norm-adv', type=lambda x:bool(strtobool(x)), default=True, nargs='?', const=True,
+    parser.add_argument(
+        '--norm-adv', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True,
         help="Toggles advantages normalization")
-    parser.add_argument('--clip-coef', type=float, default=0.2,
+    parser.add_argument(
+        '--clip-coef', type=float, default=0.2,
         help="the surrogate clipping coefficient")
-    parser.add_argument('--clip-vloss', type=lambda x:bool(strtobool(x)), default=True, nargs='?', const=True,
+    parser.add_argument(
+        '--clip-vloss', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True,
         help='Toggles wheter or not to use a clipped loss for the value function, as per the paper.')
-    parser.add_argument('--ent-coef', type=float, default=0.01,
+    parser.add_argument(
+        '--ent-coef', type=float, default=0.01,
         help="coefficient of the entropy")
-    parser.add_argument('--vf-coef', type=float, default=0.5,
+    parser.add_argument(
+        '--vf-coef', type=float, default=0.5,
         help="coefficient of the value function")
-    parser.add_argument('--max-grad-norm', type=float, default=0.5,
+    parser.add_argument(
+        '--max-grad-norm', type=float, default=0.5,
         help='the maximum norm for the gradient clipping')
-    parser.add_argument('--target-kl', type=float, default=None,
+    parser.add_argument(
+        '--target-kl', type=float, default=None,
         help='the target KL divergence threshold')
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
@@ -125,14 +140,16 @@ class PPOAgent(tf.keras.Model):
         self.act_size = envs.single_action_space.n
 
         # critic_network
-        inputs = tf.keras.layers.Input(shape=(int(np.product(envs.single_observation_space.shape)),), name="observations")
-        first_layer = tf.keras.layers.Dense(64, name="1st_critic_layer", activation='tanh')(inputs)
-        second_layer = tf.keras.layers.Dense(64, name="2nd_critic_layer", activation='tanh')(first_layer)
+        inputs = tf.keras.layers.Input(
+            shape=(int(np.product(envs.single_observation_space.shape)),), name="observations"
+        )
+        first_layer = tf.keras.layers.Dense(64, name="1st_critic_layer", activation="tanh")(inputs)
+        second_layer = tf.keras.layers.Dense(64, name="2nd_critic_layer", activation="tanh")(first_layer)
         value_out = tf.keras.layers.Dense(1, name="critic_value")(second_layer)
 
         # actor network
-        first_layer = tf.keras.layers.Dense(64, name="1st_actor_layer", activation='tanh')(inputs)
-        second_layer = tf.keras.layers.Dense(64, name="2nd_actor_layer", activation='tanh')(first_layer)
+        first_layer = tf.keras.layers.Dense(64, name="1st_actor_layer", activation="tanh")(inputs)
+        second_layer = tf.keras.layers.Dense(64, name="2nd_actor_layer", activation="tanh")(first_layer)
         logits_out = tf.keras.layers.Dense(self.act_size, activation=None, name="action_logits")(second_layer)
         # todo add normalization to output layers
 
@@ -169,7 +186,9 @@ class PPOAgent(tf.keras.Model):
             entropy=self.entropy(logits),
         )
 
-    def get_loss(self, obs, actions, returns, advantages, values, old_log_probs, clip_coef, norm_adv, ent_coef, vf_coef):
+    def get_loss(
+        self, obs, actions, returns, advantages, values, old_log_probs, clip_coef, norm_adv, ent_coef, vf_coef
+    ):
         # get new prediciton of logits, entropy and value
         new_action_values = self.get_action_and_value(obs, actions)
 
@@ -184,18 +203,13 @@ class PPOAgent(tf.keras.Model):
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # Policy loss
-        min_adv = tf.where(advantages > 0, (1 + clip_coef) * advantages,
-                           (1 - clip_coef) * advantages)
+        min_adv = tf.where(advantages > 0, (1 + clip_coef) * advantages, (1 - clip_coef) * advantages)
         pg_loss = -tf.reduce_mean(tf.math.minimum(ratio * advantages, min_adv))
 
         # Value loss
         if args.clip_vloss:
             v_loss_unclipped = tf.square(new_action_values.values - returns)
-            v_clipped = values + tf.clip_by_value(
-                new_action_values.values - values,
-                -clip_coef,
-                clip_coef,
-            )
+            v_clipped = values + tf.clip_by_value(new_action_values.values - values, -clip_coef, clip_coef,)
             v_loss_clipped = tf.square(v_clipped - returns)
             v_loss_max = tf.math.maximum(v_loss_unclipped, v_loss_clipped)
             v_loss = 0.5 * tf.reduce_mean(v_loss_max)
@@ -216,7 +230,7 @@ class PPOAgent(tf.keras.Model):
         )
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # noqa 233
 
     args = parse_args()
 
@@ -254,30 +268,28 @@ if __name__ == "__main__":
     with writer.as_default():
         for update in range(1, num_updates + 1):
 
-            # ALGO Logic: Storage setup
-            obs = []
-            actions = []
-            logprobs = []
-            rewards = []
-            dones = []
-            values = []
-
-            # todo init as numpy arrays then we do not need to change data types, or directly in tensorflow?
+            # set up storage
+            obs = np.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape, dtype=np.float32)
+            actions = np.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape, dtype=np.int32)
+            logprobs = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
+            rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
+            dones = np.zeros((args.num_steps, args.num_envs), dtype=np.bool)
+            values = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
 
             for step in range(0, args.num_steps):
                 global_step += 1 * args.num_envs
-                obs.append(next_obs)
-                dones.append(done)
+                obs[step] = next_obs
+                dones[step] = done
 
                 # ALGO LOGIC: action logic
                 action_value = agent.get_action_and_value(next_obs)
-                values.append(tf.reshape(action_value.values, [-1]))
-                actions.append(action_value.actions)
-                logprobs.append(action_value.logits)
+                values[step] = tf.reshape(action_value.values, [-1])
+                actions[step] = action_value.actions
+                logprobs[step] = action_value.logits
 
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, reward, done, info = envs.step(action_value.actions)
-                rewards.append(reward)
+                rewards[step] = reward
 
                 for item in info:
                     if "episode" in item.keys():
@@ -286,14 +298,6 @@ if __name__ == "__main__":
                         tf.summary.scalar("charts/episodic_length", item["episode"]["l"], global_step)
                         break
                         # todo does it end the episode for all three environments? this needs improvement
-
-            # convert data to numpy array
-            obs = np.array(obs, dtype=np.float32)
-            actions = np.array(actions, dtype=np.int32)
-            logprobs = np.array(logprobs, dtype=np.float32)
-            rewards = np.array(rewards, dtype=np.float32)
-            dones = np.array(dones, dtype=np.bool)
-            values = np.array(values, dtype=np.float32)
 
             # bootstrap value if not done
             next_action_values = agent.get_action_and_value(next_obs)
@@ -342,9 +346,13 @@ if __name__ == "__main__":
                             args.vf_coef,
                         )
 
-                    trainable_variables = agent.base_model.trainable_variables  # take all trainable variables into account
+                    trainable_variables = (
+                        agent.base_model.trainable_variables
+                    )  # take all trainable variables into account
                     grads = tape.gradient(loss_info.total_loss, trainable_variables)
-                    grads, grad_norm = tf.clip_by_global_norm(grads, args.max_grad_norm)  # clip gradients for slight updates
+                    grads, grad_norm = tf.clip_by_global_norm(
+                        grads, args.max_grad_norm
+                    )  # clip gradients for slight updates
 
                     optimizer.apply_gradients(zip(grads, trainable_variables))
 

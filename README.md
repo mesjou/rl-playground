@@ -2,7 +2,7 @@
 
 Simple single file implementation of PPO with TensorFlow 2.0
 
-I created the repo to understand PPO and make all of the basic functionality available in 
+I created the repo to understand PPO and make all of the basic functionality available in
 one single file to quickly grasp the concepts.
 I plan to extend the algorithms in hte future with additional other RL algos.
 
@@ -22,7 +22,7 @@ pyenv virtualenv 3.8.10 rl-project
 pyenv local rl-project
 
 python3 -m pip install --upgrade pip
-python3 -m pip install -r requirements.txt 
+python3 -m pip install -r requirements.txt
 ```
 
 
