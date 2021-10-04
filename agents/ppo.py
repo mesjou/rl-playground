@@ -20,6 +20,14 @@ PPOLossInfo = collections.namedtuple('PPOLossInfo', (
 ))
 
 
+ActionValues = collections.namedtuple('ActionValues', (
+    'actions',
+    'values',
+    'logits',
+    'entropy',
+))
+
+
 class MyLRSchedule(LearningRateSchedule):
     def __init__(self, initial_learning_rate, num_updates):
         super(LearningRateSchedule, self).__init__()
@@ -42,7 +50,7 @@ def parse_args():
         help='the learning rate of the optimizer')
     parser.add_argument('--seed', type=int, default=1,
         help='seed of the experiment')
-    parser.add_argument('--total-timesteps', type=int, default=25000,
+    parser.add_argument('--total-timesteps', type=int, default=200000,
         help='total timesteps of the experiments')
     parser.add_argument('--torch-deterministic', type=lambda x:bool(strtobool(x)), default=True, nargs='?', const=True,
         help='if toggled, `torch.backends.cudnn.deterministic=False`')
@@ -153,13 +161,19 @@ class PPOAgent(tf.keras.Model):
         logits, values = self.base_model(obs)
         if actions is None:
             actions = tf.squeeze(tf.random.categorical(logits, 1), axis=-1)
-        return np.squeeze(actions), tf.squeeze(self.logp(logits, actions)), self.entropy(logits), tf.squeeze(values)
+
+        return ActionValues(
+            actions=np.squeeze(actions),
+            values=tf.squeeze(values),
+            logits=tf.squeeze(self.logp(logits, actions)),
+            entropy=self.entropy(logits),
+        )
 
     def get_loss(self, obs, actions, returns, advantages, values, old_log_probs, clip_coef, norm_adv, ent_coef, vf_coef):
         # get new prediciton of logits, entropy and value
-        _, new_log_prob, entropy, newvalue = self.get_action_and_value(obs, actions)
+        new_action_values = self.get_action_and_value(obs, actions)
 
-        logratio = new_log_prob - old_log_probs
+        logratio = new_action_values.logits - old_log_probs
         ratio = tf.exp(logratio)
 
         # calculate approx_kl http://joschu.net/blog/kl-approx.html
@@ -176,9 +190,9 @@ class PPOAgent(tf.keras.Model):
 
         # Value loss
         if args.clip_vloss:
-            v_loss_unclipped = tf.square(newvalue - returns)
+            v_loss_unclipped = tf.square(new_action_values.values - returns)
             v_clipped = values + tf.clip_by_value(
-                newvalue - values,
+                new_action_values.values - values,
                 -clip_coef,
                 clip_coef,
             )
@@ -186,9 +200,9 @@ class PPOAgent(tf.keras.Model):
             v_loss_max = tf.math.maximum(v_loss_unclipped, v_loss_clipped)
             v_loss = 0.5 * tf.reduce_mean(v_loss_max)
         else:
-            v_loss = 0.5 * tf.reduce_mean(tf.square(newvalue - returns))
+            v_loss = 0.5 * tf.reduce_mean(tf.square(new_action_values.values - returns))
 
-        entropy_loss = -tf.reduce_mean(entropy)
+        entropy_loss = -tf.reduce_mean(new_action_values.entropy)
 
         total_loss = pg_loss + ent_coef * entropy_loss + v_loss * vf_coef
 
@@ -203,25 +217,12 @@ class PPOAgent(tf.keras.Model):
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    run_name = f"{args.gym_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    if args.track:
-        import wandb
 
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
-        )
+    args = parse_args()
+
+    # tensorboard
+    run_name = f"{args.gym_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     writer = tf.summary.create_file_writer(f"runs/{run_name}")
-    #file_writer.add_text(
-    #    "hyperparameters",
-    #    "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    #)
 
     # seeding
     random.seed(args.seed)
@@ -261,19 +262,21 @@ if __name__ == "__main__":
             dones = []
             values = []
 
+            # todo init as numpy arrays then we do not need to change data types, or directly in tensorflow?
+
             for step in range(0, args.num_steps):
                 global_step += 1 * args.num_envs
                 obs.append(next_obs)
                 dones.append(done)
 
                 # ALGO LOGIC: action logic
-                action, logprob, _, value = agent.get_action_and_value(next_obs)
-                values.append(tf.reshape(value, [-1]))
-                actions.append(action)
-                logprobs.append(logprob)
+                action_value = agent.get_action_and_value(next_obs)
+                values.append(tf.reshape(action_value.values, [-1]))
+                actions.append(action_value.actions)
+                logprobs.append(action_value.logits)
 
                 # TRY NOT TO MODIFY: execute the game and log data.
-                next_obs, reward, done, info = envs.step(action)
+                next_obs, reward, done, info = envs.step(action_value.actions)
                 rewards.append(reward)
 
                 for item in info:
@@ -282,6 +285,7 @@ if __name__ == "__main__":
                         tf.summary.scalar("charts/episodic_return", item["episode"]["r"], global_step)
                         tf.summary.scalar("charts/episodic_length", item["episode"]["l"], global_step)
                         break
+                        # todo does it end the episode for all three environments? this needs improvement
 
             # convert data to numpy array
             obs = np.array(obs, dtype=np.float32)
@@ -292,13 +296,13 @@ if __name__ == "__main__":
             values = np.array(values, dtype=np.float32)
 
             # bootstrap value if not done
-            _, _, _, next_value = agent.get_action_and_value(next_obs)
+            next_action_values = agent.get_action_and_value(next_obs)
             advantages = np.zeros_like(rewards)
             lastgaelam = 0
             for t in reversed(range(args.num_steps)):
                 if t == args.num_steps - 1:
                     nextnonterminal = 1.0 - done
-                    nextvalues = next_value
+                    nextvalues = next_action_values.values
                 else:
                     nextnonterminal = 1.0 - dones[t + 1]
                     nextvalues = values[t + 1]
@@ -317,7 +321,6 @@ if __name__ == "__main__":
 
             # Optimizaing the policy and value network
             b_inds = np.arange(args.batch_size)
-            clipfracs = []
             for epoch in range(args.update_epochs):
                 np.random.shuffle(b_inds)
                 for start in range(0, args.batch_size, args.minibatch_size):
@@ -353,7 +356,6 @@ if __name__ == "__main__":
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
-            # TRY NOT TO MODIFY: record rewards for plotting purposes
             tf.summary.scalar("charts/learning_rate", optimizer._decayed_lr(np.float32), global_step)
             tf.summary.scalar("losses/value_loss", loss_info.v_loss, global_step)
             tf.summary.scalar("losses/policy_loss", loss_info.pg_loss, global_step)
