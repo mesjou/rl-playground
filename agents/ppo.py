@@ -9,7 +9,7 @@ import gym
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Dense, Input
-from tensorflow.keras.optimizers.schedules import LearningRateSchedule
+from tensorflow.keras.optimizers.schedules import ExponentialDecay
 
 
 def parse_args():
@@ -30,10 +30,9 @@ def parse_args():
     parser.add_argument(
         "--anneal-lr",
         type=lambda x: bool(strtobool(x)),
-        default=False,
+        default=True,
         nargs="?",
         const=True,
-        # todo cahnge default to true
         help="Toggle learning rate annealing for policy and value networks",
     )
     parser.add_argument(
@@ -86,24 +85,10 @@ PPOLossInfo = collections.namedtuple(
 ActionValues = collections.namedtuple("ActionValues", ("actions", "values", "logits", "entropy",))
 
 
-class MyLRSchedule(LearningRateSchedule):
-    def __init__(self, initial_learning_rate, num_updates):
-        super(LearningRateSchedule, self).__init__()
-        self.initial_learning_rate = initial_learning_rate
-        self.num_updates = num_updates
-
-    def __call__(self, step):
-        frac = 1.0 - (step - 1.0) / self.num_updates
-        return frac * self.initial_learning_rate
-
-
-def make_env(gym_id, seed, idx, capture_video, run_name):
+def make_env(gym_id, seed):
     def thunk():
         env = gym.make(gym_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
@@ -221,29 +206,25 @@ if __name__ == "__main__":  # noqa 233
     tf.random.set_seed(args.seed)
 
     # env setup
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(args.gym_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
-    )
+    envs = gym.vector.SyncVectorEnv([make_env(args.gym_id, args.seed + i) for i in range(args.num_envs)])
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = PPOAgent(envs.single_action_space.n, envs.single_observation_space.shape)
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
-    start_time = time.time()
     next_obs = envs.reset()
     done = np.zeros(args.num_envs)
-    num_updates = args.total_timesteps // args.batch_size
 
     # anneal learning rate if instructed to do so
     if args.anneal_lr:
-        learning_rate = MyLRSchedule(args.learning_rate, args.num_updates)
+        learning_rate = ExponentialDecay(args.learning_rate, decay_steps=args.update_epochs, decay_rate=0.999,)
     else:
         learning_rate = args.learning_rate
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate, epsilon=1e-5)
 
     with writer.as_default():
-        for update in range(1, num_updates + 1):
+        for update in range(1, args.num_updates + 1):
 
             # set up storage
             obs = np.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape, dtype=np.float32)
