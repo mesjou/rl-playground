@@ -13,87 +13,65 @@ from tensorflow.keras.optimizers.schedules import LearningRateSchedule
 
 
 def parse_args():
-    # fmt: off
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--exp-name', type=str, default=os.path.basename(__file__).rstrip(".py"), help='the name of this experiment')
-    parser.add_argument(
-        '--gym-id', type=str, default="CartPole-v1", help='the id of the gym environment')
-    parser.add_argument(
-        '--learning-rate', type=float, default=2.5e-4,
-        help='the learning rate of the optimizer')
-    parser.add_argument(
-        '--seed', type=int, default=1,
-        help='seed of the experiment')
-    parser.add_argument(
-        '--total-timesteps', type=int, default=200000,
-        help='total timesteps of the experiments')
-    parser.add_argument(
-        '--torch-deterministic', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True,
-        help='if toggled, `torch.backends.cudnn.deterministic=False`')
-    parser.add_argument(
-        '--cuda', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True,
-        help='if toggled, cuda will be enabled by default')
-    parser.add_argument(
-        '--track', type=lambda x: bool(strtobool(x)), default=False, nargs='?', const=True,
-        help='if toggled, this experiment will be tracked with Weights and Biases')
-    parser.add_argument(
-        '--wandb-project-name', type=str, default="cleanRL",
-        help="the wandb's project name")
-    parser.add_argument(
-        '--wandb-entity', type=str, default=None,
-        help="the entity (team) of wandb's project")
-    parser.add_argument(
-        '--capture-video', type=lambda x: bool(strtobool(x)), default=False, nargs='?', const=True,
-        help='weather to capture videos of the agent performances (check out `videos` folder)')
+        "--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"), help="the name of this experiment"
+    )
+    parser.add_argument("--gym-id", type=str, default="CartPole-v1", help="the id of the gym environment")
+    parser.add_argument("--learning-rate", type=float, default=2.5e-4, help="the learning rate of the optimizer")
+    parser.add_argument("--seed", type=int, default=1, help="seed of the experiment")
+    parser.add_argument("--total-timesteps", type=int, default=200000, help="total timesteps of the experiments")
 
     # Algorithm specific arguments
+    parser.add_argument("--num-envs", type=int, default=4, help="the number of parallel game environments")
     parser.add_argument(
-        '--num-envs', type=int, default=4,
-        help='the number of parallel game environments')
+        "--num-steps", type=int, default=128, help="the number of steps to run in each environment per policy rollout"
+    )
     parser.add_argument(
-        '--num-steps', type=int, default=128,
-        help='the number of steps to run in each environment per policy rollout')
-    parser.add_argument(
-        '--anneal-lr', type=lambda x: bool(strtobool(x)), default=False, nargs='?', const=True,
+        "--anneal-lr",
+        type=lambda x: bool(strtobool(x)),
+        default=False,
+        nargs="?",
+        const=True,
         # todo cahnge default to true
-        help="Toggle learning rate annealing for policy and value networks")
+        help="Toggle learning rate annealing for policy and value networks",
+    )
     parser.add_argument(
-        '--gae', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True,
-        help='Use GAE for advantage computation')
+        "--gae",
+        type=lambda x: bool(strtobool(x)),
+        default=True,
+        nargs="?",
+        const=True,
+        help="Use GAE for advantage computation",
+    )
+    parser.add_argument("--gamma", type=float, default=0.99, help="the discount factor gamma")
     parser.add_argument(
-        '--gamma', type=float, default=0.99,
-        help='the discount factor gamma')
+        "--gae-lambda", type=float, default=0.95, help="the lambda for the general advantage estimation"
+    )
+    parser.add_argument("--num-minibatches", type=int, default=4, help="the number of mini-batches")
+    parser.add_argument("--update-epochs", type=int, default=4, help="the K epochs to update the policy")
     parser.add_argument(
-        '--gae-lambda', type=float, default=0.95,
-        help='the lambda for the general advantage estimation')
+        "--norm-adv",
+        type=lambda x: bool(strtobool(x)),
+        default=True,
+        nargs="?",
+        const=True,
+        help="Toggles advantages normalization",
+    )
+    parser.add_argument("--clip-coef", type=float, default=0.2, help="the surrogate clipping coefficient")
     parser.add_argument(
-        '--num-minibatches', type=int, default=4,
-        help='the number of mini-batches')
-    parser.add_argument(
-        '--update-epochs', type=int, default=4,
-        help="the K epochs to update the policy")
-    parser.add_argument(
-        '--norm-adv', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True,
-        help="Toggles advantages normalization")
-    parser.add_argument(
-        '--clip-coef', type=float, default=0.2,
-        help="the surrogate clipping coefficient")
-    parser.add_argument(
-        '--clip-vloss', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True,
-        help='Toggles wheter or not to use a clipped loss for the value function, as per the paper.')
-    parser.add_argument(
-        '--ent-coef', type=float, default=0.01,
-        help="coefficient of the entropy")
-    parser.add_argument(
-        '--vf-coef', type=float, default=0.5,
-        help="coefficient of the value function")
-    parser.add_argument(
-        '--max-grad-norm', type=float, default=0.5,
-        help='the maximum norm for the gradient clipping')
-    parser.add_argument(
-        '--target-kl', type=float, default=None,
-        help='the target KL divergence threshold')
+        "--clip-vloss",
+        type=lambda x: bool(strtobool(x)),
+        default=True,
+        nargs="?",
+        const=True,
+        help="Toggles wheter or not to use a clipped loss for the value function, as per the paper.",
+    )
+    parser.add_argument("--ent-coef", type=float, default=0.01, help="coefficient of the entropy")
+    parser.add_argument("--vf-coef", type=float, default=0.5, help="coefficient of the value function")
+    parser.add_argument("--max-grad-norm", type=float, default=0.5, help="the maximum norm for the gradient clipping")
+    parser.add_argument("--target-kl", type=float, default=None, help="the target KL divergence threshold")
+
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -315,12 +293,12 @@ if __name__ == "__main__":  # noqa 233
             returns = advantages + values
 
             # flatten the batch
-            b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
-            b_logprobs = logprobs.reshape(-1)
-            b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
-            b_advantages = advantages.reshape(-1)
-            b_returns = returns.reshape(-1)
-            b_values = values.reshape(-1)
+            obs = obs.reshape((-1,) + envs.single_observation_space.shape)
+            logprobs = logprobs.reshape(-1)
+            actions = actions.reshape((-1,) + envs.single_action_space.shape)
+            advantages = advantages.reshape(-1)
+            returns = returns.reshape(-1)
+            values = values.reshape(-1)
 
             # Optimizaing the policy and value network
             b_inds = np.arange(args.batch_size)
@@ -333,12 +311,12 @@ if __name__ == "__main__":  # noqa 233
                     # take gradient and backpropagate
                     with tf.GradientTape() as tape:
                         loss_info = agent.get_loss(
-                            b_obs[mb_inds],
-                            b_actions[mb_inds],
-                            b_returns[mb_inds],
-                            b_advantages[mb_inds],
-                            b_values[mb_inds],
-                            b_logprobs[mb_inds],
+                            obs[mb_inds],
+                            actions[mb_inds],
+                            returns[mb_inds],
+                            advantages[mb_inds],
+                            values[mb_inds],
+                            logprobs[mb_inds],
                         )
 
                     trainable_variables = agent.base_model.trainable_variables
@@ -352,7 +330,7 @@ if __name__ == "__main__":  # noqa 233
                     if loss_info.approx_kl > args.target_kl:
                         break
 
-            y_pred, y_true = b_values, b_returns
+            y_pred, y_true = values, returns
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
