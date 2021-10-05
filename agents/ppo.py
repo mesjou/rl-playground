@@ -8,25 +8,8 @@ from distutils.util import strtobool
 import gym
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras.layers import Dense, Input
 from tensorflow.keras.optimizers.schedules import LearningRateSchedule
-
-PPOLossInfo = collections.namedtuple(
-    "PPOLossInfo", ("total_loss", "v_loss", "pg_loss", "entropy_loss", "approx_kl", "clipfracs",)
-)
-
-
-ActionValues = collections.namedtuple("ActionValues", ("actions", "values", "logits", "entropy",))
-
-
-class MyLRSchedule(LearningRateSchedule):
-    def __init__(self, initial_learning_rate, num_updates):
-        super(LearningRateSchedule, self).__init__()
-        self.initial_learning_rate = initial_learning_rate
-        self.num_updates = num_updates
-
-    def __call__(self, step):
-        frac = 1.0 - (step - 1.0) / self.num_updates
-        return frac * self.initial_learning_rate
 
 
 def parse_args():
@@ -114,8 +97,26 @@ def parse_args():
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
-    # fmt: on
+    args.num_updates = args.total_timesteps // args.batch_size
+
     return args
+
+
+PPOLossInfo = collections.namedtuple(
+    "LossInfo", ("total_loss", "v_loss", "pg_loss", "entropy_loss", "approx_kl", "clipfracs",)
+)
+ActionValues = collections.namedtuple("ActionValues", ("actions", "values", "logits", "entropy",))
+
+
+class MyLRSchedule(LearningRateSchedule):
+    def __init__(self, initial_learning_rate, num_updates):
+        super(LearningRateSchedule, self).__init__()
+        self.initial_learning_rate = initial_learning_rate
+        self.num_updates = num_updates
+
+    def __call__(self, step):
+        frac = 1.0 - (step - 1.0) / self.num_updates
+        return frac * self.initial_learning_rate
 
 
 def make_env(gym_id, seed, idx, capture_video, run_name):
@@ -134,35 +135,34 @@ def make_env(gym_id, seed, idx, capture_video, run_name):
 
 
 class PPOAgent(tf.keras.Model):
-    def __init__(self, envs):
+    def __init__(self, action_size, state_size):
         super().__init__()
 
-        self.act_size = envs.single_action_space.n
+        self.state_size = state_size
+        self.action_size = action_size
+
+        self.base_model = self.build_model()
+
+    def build_model(self):
 
         # critic_network
-        inputs = tf.keras.layers.Input(
-            shape=(int(np.product(envs.single_observation_space.shape)),), name="observations"
-        )
-        first_layer = tf.keras.layers.Dense(64, name="1st_critic_layer", activation="tanh")(inputs)
-        second_layer = tf.keras.layers.Dense(64, name="2nd_critic_layer", activation="tanh")(first_layer)
-        value_out = tf.keras.layers.Dense(1, name="critic_value")(second_layer)
+        inputs = Input(shape=(int(np.product(self.state_size)),), name="observations")
+        first_layer = Dense(64, name="1st_critic_layer", activation="tanh")(inputs)
+        second_layer = Dense(64, name="2nd_critic_layer", activation="tanh")(first_layer)
+        value_out = Dense(1, name="critic_value")(second_layer)
 
         # actor network
-        first_layer = tf.keras.layers.Dense(64, name="1st_actor_layer", activation="tanh")(inputs)
-        second_layer = tf.keras.layers.Dense(64, name="2nd_actor_layer", activation="tanh")(first_layer)
-        logits_out = tf.keras.layers.Dense(self.act_size, activation=None, name="action_logits")(second_layer)
+        first_layer = Dense(64, name="1st_actor_layer", activation="tanh")(inputs)
+        second_layer = Dense(64, name="2nd_actor_layer", activation="tanh")(first_layer)
+        logits_out = Dense(self.action_size, activation=None, name="action_logits")(second_layer)
         # todo add normalization to output layers
 
-        self.base_model = tf.keras.Model(inputs, [logits_out, value_out])
-
-    def call(self, inputs):
-        logits, values = self.base_model(inputs)
-        return logits, values
+        return tf.keras.Model(inputs, [logits_out, value_out])
 
     def logp(self, logits, action):
         """Get the log-probability based on the action drawn from prob-distribution"""
         logp_all = tf.nn.log_softmax(logits)
-        one_hot = tf.one_hot(action, depth=self.act_size)
+        one_hot = tf.one_hot(action, depth=self.action_size)
         logp = tf.reduce_sum(one_hot * logp_all, axis=-1)
         return logp
 
@@ -186,30 +186,29 @@ class PPOAgent(tf.keras.Model):
             entropy=self.entropy(logits),
         )
 
-    def get_loss(
-        self, obs, actions, returns, advantages, values, old_log_probs, clip_coef, norm_adv, ent_coef, vf_coef
-    ):
+    def get_loss(self, obs, actions, returns, advantages, values, old_log_probs):
+
         # get new prediciton of logits, entropy and value
         new_action_values = self.get_action_and_value(obs, actions)
-
         logratio = new_action_values.logits - old_log_probs
         ratio = tf.exp(logratio)
 
         # calculate approx_kl http://joschu.net/blog/kl-approx.html
         approx_kl = tf.reduce_mean((ratio - 1) - logratio)
-        clipfracs = tf.reduce_mean(tf.cast(tf.greater(tf.abs(ratio - 1.0), clip_coef), tf.int32))
+        clipfracs = tf.reduce_mean(tf.cast(tf.greater(tf.abs(ratio - 1.0), args.clip_coef), tf.int32))
+
         # get advantages
-        if norm_adv:
+        if args.norm_adv:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # Policy loss
-        min_adv = tf.where(advantages > 0, (1 + clip_coef) * advantages, (1 - clip_coef) * advantages)
+        min_adv = tf.where(advantages > 0, (1 + args.clip_coef) * advantages, (1 - args.clip_coef) * advantages)
         pg_loss = -tf.reduce_mean(tf.math.minimum(ratio * advantages, min_adv))
 
         # Value loss
         if args.clip_vloss:
             v_loss_unclipped = tf.square(new_action_values.values - returns)
-            v_clipped = values + tf.clip_by_value(new_action_values.values - values, -clip_coef, clip_coef,)
+            v_clipped = values + tf.clip_by_value(new_action_values.values - values, -args.clip_coef, args.clip_coef,)
             v_loss_clipped = tf.square(v_clipped - returns)
             v_loss_max = tf.math.maximum(v_loss_unclipped, v_loss_clipped)
             v_loss = 0.5 * tf.reduce_mean(v_loss_max)
@@ -218,7 +217,7 @@ class PPOAgent(tf.keras.Model):
 
         entropy_loss = -tf.reduce_mean(new_action_values.entropy)
 
-        total_loss = pg_loss + ent_coef * entropy_loss + v_loss * vf_coef
+        total_loss = pg_loss + args.ent_coef * entropy_loss + v_loss * args.vf_coef
 
         return PPOLossInfo(
             total_loss=total_loss,
@@ -249,7 +248,7 @@ if __name__ == "__main__":  # noqa 233
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = PPOAgent(envs)
+    agent = PPOAgent(envs.single_action_space.n, envs.single_observation_space.shape)
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -260,7 +259,7 @@ if __name__ == "__main__":  # noqa 233
 
     # anneal learning rate if instructed to do so
     if args.anneal_lr:
-        learning_rate = MyLRSchedule(args.learning_rate, num_updates)
+        learning_rate = MyLRSchedule(args.learning_rate, args.num_updates)
     else:
         learning_rate = args.learning_rate
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate, epsilon=1e-5)
@@ -340,20 +339,13 @@ if __name__ == "__main__":  # noqa 233
                             b_advantages[mb_inds],
                             b_values[mb_inds],
                             b_logprobs[mb_inds],
-                            args.clip_coef,
-                            args.norm_adv,
-                            args.ent_coef,
-                            args.vf_coef,
                         )
 
-                    trainable_variables = (
-                        agent.base_model.trainable_variables
-                    )  # take all trainable variables into account
+                    trainable_variables = agent.base_model.trainable_variables
                     grads = tape.gradient(loss_info.total_loss, trainable_variables)
-                    grads, grad_norm = tf.clip_by_global_norm(
-                        grads, args.max_grad_norm
-                    )  # clip gradients for slight updates
 
+                    # clip gradients for slight updates
+                    grads, grad_norm = tf.clip_by_global_norm(grads, args.max_grad_norm)
                     optimizer.apply_gradients(zip(grads, trainable_variables))
 
                 if args.target_kl is not None:
@@ -371,8 +363,6 @@ if __name__ == "__main__":  # noqa 233
             tf.summary.scalar("losses/approx_kl", loss_info.approx_kl, global_step)
             tf.summary.scalar("losses/clipfrac", np.mean(loss_info.clipfracs), global_step)
             tf.summary.scalar("losses/explained_variance", explained_var, global_step)
-            print("SPS:", int(global_step / (time.time() - start_time)))
-            tf.summary.scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
         writer.flush()
         envs.close()
