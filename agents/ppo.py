@@ -9,7 +9,6 @@ import gym
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Dense, Input
-from tensorflow.keras.optimizers.schedules import ExponentialDecay
 
 
 def parse_args():
@@ -19,21 +18,13 @@ def parse_args():
     )
     parser.add_argument("--gym-id", type=str, default="CartPole-v1", help="the id of the gym environment")
     parser.add_argument("--learning-rate", type=float, default=2.5e-4, help="the learning rate of the optimizer")
-    parser.add_argument("--seed", type=int, default=2, help="seed of the experiment")
+    parser.add_argument("--seed", type=int, default=1, help="seed of the experiment")
     parser.add_argument("--total-timesteps", type=int, default=200000, help="total timesteps of the experiments")
 
     # Algorithm specific arguments
     parser.add_argument("--num-envs", type=int, default=4, help="the number of parallel game environments")
     parser.add_argument(
         "--num-steps", type=int, default=128, help="the number of steps to run in each environment per policy rollout"
-    )
-    parser.add_argument(
-        "--anneal-lr",
-        type=lambda x: bool(strtobool(x)),
-        default=False,
-        nargs="?",
-        const=True,
-        help="Toggle learning rate annealing for policy and value networks",
     )
     parser.add_argument(
         "--gae",
@@ -121,23 +112,19 @@ class PPOAgent(tf.keras.Model):
 
         # critic_network
         inputs = Input(shape=(int(np.product(self.state_size)),), name="observations")
-        first_layer = Dense(64, name="1st_critic_layer", activation="tanh", kernel_initializer=normc_initializer(0.1))(
-            inputs
-        )
-        second_layer = Dense(64, name="2nd_critic_layer", activation="tanh", kernel_initializer=normc_initializer(0.1))(
+        first_layer = Dense(64, name="1st_critic", activation="tanh", kernel_initializer=normc_initializer(1.0))(inputs)
+        second_layer = Dense(64, name="2nd_critic", activation="tanh", kernel_initializer=normc_initializer(1.0))(
             first_layer
         )
-        value_out = Dense(1, name="critic_value", kernel_initializer=normc_initializer(0.01))(second_layer)
+        value_out = Dense(1, name="value", kernel_initializer=normc_initializer(1.0))(second_layer)
 
         # actor network
-        first_layer = Dense(64, name="1st_actor_layer", activation="tanh", kernel_initializer=normc_initializer(0.1))(
-            inputs
-        )
-        second_layer = Dense(64, name="2nd_actor_layer", activation="tanh", kernel_initializer=normc_initializer(0.1))(
+        first_layer = Dense(64, name="1st_actor", activation="tanh", kernel_initializer=normc_initializer(1.0))(inputs)
+        second_layer = Dense(64, name="2nd_actor", activation="tanh", kernel_initializer=normc_initializer(1.0))(
             first_layer
         )
         logits_out = Dense(
-            self.action_size, activation=None, name="action_logits", kernel_initializer=normc_initializer(0.1)
+            self.action_size, activation=None, name="logits", kernel_initializer=normc_initializer(0.01)
         )(second_layer)
 
         return tf.keras.Model(inputs, [logits_out, value_out])
@@ -225,25 +212,17 @@ if __name__ == "__main__":  # noqa 233
     np.random.seed(args.seed)
     tf.random.set_seed(args.seed)
 
-    # env setup
+    # env, agent and optimizer setup
     envs = gym.vector.SyncVectorEnv([make_env(args.gym_id, args.seed + i) for i in range(args.num_envs)])
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
-
     agent = PPOAgent(envs.single_action_space.n, envs.single_observation_space.shape)
-
-    # TRY NOT TO MODIFY: start the game
-    global_step = 0
-    next_obs = envs.reset()
-    done = np.zeros(args.num_envs)
-
-    # anneal learning rate if instructed to do so
-    if args.anneal_lr:
-        learning_rate = ExponentialDecay(args.learning_rate, decay_steps=args.update_epochs, decay_rate=0.999,)
-    else:
-        learning_rate = args.learning_rate
-    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate, epsilon=1e-5)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate, epsilon=1e-5)
 
     with writer.as_default():
+        global_step = 0
+        next_obs = envs.reset()
+        done = np.zeros(args.num_envs)
+
         for update in range(1, args.num_updates + 1):
 
             # set up storage
@@ -259,13 +238,13 @@ if __name__ == "__main__":  # noqa 233
                 obs[step] = next_obs
                 dones[step] = done
 
-                # ALGO LOGIC: action logic
+                # get action of the agent
                 action_value = agent.get_action_and_value(next_obs)
                 values[step] = tf.reshape(action_value.values, [-1])
                 actions[step] = action_value.actions
                 logprobs[step] = action_value.logits
 
-                # TRY NOT TO MODIFY: execute the game and log data.
+                # play the game one round
                 next_obs, reward, done, info = envs.step(action_value.actions)
                 rewards[step] = reward
 
@@ -277,7 +256,7 @@ if __name__ == "__main__":  # noqa 233
                         break
                         # todo does it end the episode for all three environments? this needs improvement
 
-            # bootstrap value if not done
+            # bootstrap value if not done and get advantages
             next_action_values = agent.get_action_and_value(next_obs)
             advantages = np.zeros_like(rewards)
             lastgaelam = 0
