@@ -19,7 +19,7 @@ def parse_args():
     )
     parser.add_argument("--gym-id", type=str, default="CartPole-v1", help="the id of the gym environment")
     parser.add_argument("--learning-rate", type=float, default=2.5e-4, help="the learning rate of the optimizer")
-    parser.add_argument("--seed", type=int, default=1, help="seed of the experiment")
+    parser.add_argument("--seed", type=int, default=2, help="seed of the experiment")
     parser.add_argument("--total-timesteps", type=int, default=200000, help="total timesteps of the experiments")
 
     # Algorithm specific arguments
@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument(
         "--anneal-lr",
         type=lambda x: bool(strtobool(x)),
-        default=True,
+        default=False,
         nargs="?",
         const=True,
         help="Toggle learning rate annealing for policy and value networks",
@@ -97,6 +97,17 @@ def make_env(gym_id, seed):
     return thunk
 
 
+def normc_initializer(std=1.0):
+    """Custom  kernel initalizer copied from rllib"""
+
+    def _initializer(shape, dtype=None, partition_info=None):
+        out = np.random.randn(*shape).astype(np.float32)
+        out *= std / np.sqrt(np.square(out).sum(axis=0, keepdims=True))
+        return tf.constant(out)
+
+    return _initializer
+
+
 class PPOAgent(tf.keras.Model):
     def __init__(self, action_size, state_size):
         super().__init__()
@@ -110,15 +121,24 @@ class PPOAgent(tf.keras.Model):
 
         # critic_network
         inputs = Input(shape=(int(np.product(self.state_size)),), name="observations")
-        first_layer = Dense(64, name="1st_critic_layer", activation="tanh")(inputs)
-        second_layer = Dense(64, name="2nd_critic_layer", activation="tanh")(first_layer)
-        value_out = Dense(1, name="critic_value")(second_layer)
+        first_layer = Dense(64, name="1st_critic_layer", activation="tanh", kernel_initializer=normc_initializer(0.1))(
+            inputs
+        )
+        second_layer = Dense(64, name="2nd_critic_layer", activation="tanh", kernel_initializer=normc_initializer(0.1))(
+            first_layer
+        )
+        value_out = Dense(1, name="critic_value", kernel_initializer=normc_initializer(0.01))(second_layer)
 
         # actor network
-        first_layer = Dense(64, name="1st_actor_layer", activation="tanh")(inputs)
-        second_layer = Dense(64, name="2nd_actor_layer", activation="tanh")(first_layer)
-        logits_out = Dense(self.action_size, activation=None, name="action_logits")(second_layer)
-        # todo add normalization to output layers
+        first_layer = Dense(64, name="1st_actor_layer", activation="tanh", kernel_initializer=normc_initializer(0.1))(
+            inputs
+        )
+        second_layer = Dense(64, name="2nd_actor_layer", activation="tanh", kernel_initializer=normc_initializer(0.1))(
+            first_layer
+        )
+        logits_out = Dense(
+            self.action_size, activation=None, name="action_logits", kernel_initializer=normc_initializer(0.1)
+        )(second_layer)
 
         return tf.keras.Model(inputs, [logits_out, value_out])
 
