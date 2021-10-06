@@ -2,8 +2,8 @@ import random
 
 import numpy as np
 import tensorflow as tf
-from algorithms.ppo1.agent import PPOAgent
-from algorithms.ppo1.runner import GymRunner
+from ppo.agent import PPOAgent
+from ppo.runner import GymRunner
 
 
 def set_seed(seed):

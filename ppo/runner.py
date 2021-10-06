@@ -3,7 +3,7 @@ import time
 import gym
 import numpy as np
 import tensorflow as tf
-from algorithms.ppo1.utils import make_env
+from ppo.utils import make_env
 
 
 class GymRunner:

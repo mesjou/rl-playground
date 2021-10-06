@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from algorithms.ppo1.utils import normc_initializer, PPOLossInfo
+from ppo.utils import normc_initializer, PPOLossInfo
 from tensorflow.keras.layers import Dense, Input
 from tensorflow.keras.optimizers import Adam
 
