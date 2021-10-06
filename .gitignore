@@ -133,4 +133,5 @@ dmypy.json
 /.idea
 
 # Run experiments
-runs/
+runs/*
+runs

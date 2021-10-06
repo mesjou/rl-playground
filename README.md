@@ -1,14 +1,19 @@
 # RL playground
 
-Simple single file implementation of PPO with TensorFlow 2.0
+Simple implementation of PPO with TensorFlow 2.0 to solve OpenAI's CartPole-v1.
 
-I created the repo to understand PPO and make all of the basic functionality available in
-one single file to quickly grasp the concepts.
-In the future, I plan to extend the repo with other RL algos.
+The simplicity makes understanding of PPO straightforward.
+All steps are represented in two files:
+`agent.py` implements the actor and critic networks.
+In Addition, it implements the forward pass (values/action) and the loss fuction.
+`runner.py` implements the rollout of the multiple parallel environments.
+In addition, it implements the advantage calculation and training of the agent on mini-batches.
 
-## Get started
+In the future, I plan to extend the repo with other RL algos (e.g. A3C or continuous PPO).
 
-Prerequisites (Example for MacOS):
+## Getting Started
+
+Prerequisites (Example with pyenv python version handling for MacOS):
 
 * macOS
 * pyenv installed
@@ -24,6 +29,18 @@ pyenv local rl-project
 python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 ```
+
+## Run Game
+
+Run the game and visualize in TensorBoard
+```bash
+python3 cartpole_ppo.py
+tensorboard --logdir=runs/
+```
+
+## Authors
+
+- [mesjou](https://github.com/mesjou)
 
 ## References
 
