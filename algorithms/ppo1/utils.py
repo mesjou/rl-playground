@@ -18,7 +18,7 @@ def make_env(gym_id, seed):
 
 
 def normc_initializer(std=1.0):
-    """Custom  kernel initalizer copied from rllib"""
+    """Custom  kernel initalizer copied from OpenAI baselines"""
 
     def _initializer(shape, dtype=None, partition_info=None):
         out = np.random.randn(*shape).astype(np.float32)

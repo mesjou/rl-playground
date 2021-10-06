@@ -5,9 +5,8 @@ from tensorflow.keras.layers import Dense, Input
 from tensorflow.keras.optimizers import Adam
 
 
-class PPOAgent(tf.keras.Model):
+class PPOAgent:
     def __init__(self, state_shape, action_size):
-        super().__init__()
 
         self.state_shape = state_shape
         self.action_size = action_size
@@ -19,7 +18,7 @@ class PPOAgent(tf.keras.Model):
         self.learning_rate = 2.5e-4  # the learning rate of the optimizer
 
         # agent state
-        self.base_model = self.build_model()
+        self.model = self.build_model()
         self.optimizer = Adam(learning_rate=self.learning_rate, epsilon=1e-5)
 
     def build_model(self):
@@ -34,10 +33,6 @@ class PPOAgent(tf.keras.Model):
         logits = Dense(self.action_size, activation=None, kernel_initializer=normc_initializer(0.01))(actor_2)
 
         return tf.keras.Model(inputs, [logits, value])
-
-    def forward(self, obs):
-        logits, values = self.base_model(obs)
-        return logits, values
 
     def logp(self, logits, action):
         """Get the log-probability based on the action drawn from prob-distribution"""
@@ -55,7 +50,7 @@ class PPOAgent(tf.keras.Model):
         return tf.reduce_sum(p0 * (tf.math.log(z0) - a0), axis=-1)
 
     def action_and_value(self, obs, actions=None):
-        logits, values = self.base_model(obs)
+        logits, values = self.model(obs)
         if actions is None:
             actions = tf.squeeze(tf.random.categorical(logits, 1), axis=-1)
         log_probs = self.logp(logits, actions)

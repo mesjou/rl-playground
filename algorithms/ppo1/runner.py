@@ -114,8 +114,8 @@ class GymRunner:
         writer = tf.summary.create_file_writer(f"runs/{self.run_name}")
         with writer.as_default():
             for epoch in range(1, self.epochs + 1):
-                obs, actions, returns, advantages, values, log_probs = self.rollout(agent)
-                loss_info = self.train(agent, obs, actions, returns, advantages, values, log_probs)
+                obs, actions, log_probs, returns, advantages, values = self.rollout(agent)
+                loss_info = self.train(agent, obs, actions, log_probs, returns, advantages, values)
 
                 y_pred, y_true = values, returns
                 var_y = np.var(y_true)
@@ -132,7 +132,7 @@ class GymRunner:
         writer.flush()
         self.envs.close()
 
-    def train(self, agent, obs, actions, returns, advantages, values, log_probs):
+    def train(self, agent, obs, actions, log_probs, returns, advantages, values):
         inds = np.arange(self.batch_size)
 
         for _ in range(self.train_iters):
@@ -145,7 +145,7 @@ class GymRunner:
                 # take gradient and backpropagate
                 with tf.GradientTape() as tape:
                     loss_info = agent.loss(obs[i], actions[i], returns[i], advantages[i], values[i], log_probs[i])
-                trainable_variables = agent.base_model.trainable_variables
+                trainable_variables = agent.model.trainable_variables
                 grads = tape.gradient(loss_info.total_loss, trainable_variables)
 
                 # clip gradients for slight updates
@@ -154,6 +154,6 @@ class GymRunner:
 
             if loss_info.approx_kl > 1.5 * self.target_kl:
                 print(f"Early stopping at step {_} due to reaching max kl.")
-                # break
+                break
 
         return loss_info
