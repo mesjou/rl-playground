@@ -13,10 +13,11 @@ class GymRunner:
         # storage
         self.env = gym.make(env_id)
         self.env = wrappers.RecordVideo(self.env, "./videos/" + str(time.time()) + "/")
+        self.env.seed(seed)
 
         # hyperparameters
         self.epochs = 100  # the number of total epochs for learning
-        self.start_steps = 10000
+        self.start_steps = 10000  # after how many random steps should training start
         self.n_timesteps = self.env.env._max_episode_steps
         self.prob_act = 0.5  # for random exploration
         self.cons_acts = 4  # for exploration
@@ -55,7 +56,18 @@ class GymRunner:
                     # train after initialization phase
                     if global_step > self.start_steps:
                         # todo should we learn more than one step?
-                        agent.learn(obs, action, rew, next_obs, done)
+                        log = agent.learn(obs, action, rew, next_obs, done)
+
+                        # logging
+                        tf.summary.scalar("values/Q1", log.q1, global_step)
+                        tf.summary.scalar("values/Q2", log.q2, global_step)
+                        tf.summary.scalar("values/Q1_var", log.q1_var, global_step)
+                        tf.summary.scalar("values/Q2_var", log.q2_var, global_step)
+                        tf.summary.scalar("values/LogP", log.logp, global_step)
+                        tf.summary.scalar("losses/LossPi", log.loss_actor, global_step)
+                        tf.summary.scalar("losses/LossQ1", log.loss_q1, global_step)
+                        tf.summary.scalar("losses/LossQ2", log.loss_q2, global_step)
+
                         if check == 1:
                             print("The buffer is ready, training is starting after {} steps".format(global_step))
                             check = 0
@@ -64,22 +76,15 @@ class GymRunner:
 
                     obs = next_obs
 
+                    # logging
                     epoch_reward += rew
                     epoch_lenght += 1
                     global_step += 1
 
                     if done:
-                        print(epoch, " Epsiode reward: ", np.sum(epoch_reward), ", time steps: ", epoch_lenght)
+                        print(f"epoch={epoch}, episodic_return={epoch_reward}, epoch lenghts={epoch_lenght}")
+                        tf.summary.scalar("charts/episodic_return", epoch_reward, global_step)
+                        tf.summary.scalar("charts/episodic_length", epoch_lenght, global_step)
                         break
 
         writer.flush()
-
-        # print(f"global_step={self.global_step}, episodic_return={item['episode']['r']}")
-        # tf.summary.scalar("charts/episodic_return", item["episode"]["r"], global_step)
-        # tf.summary.scalar("charts/episodic_length", item["episode"]["l"], global_step)
-        # tf.summary.scalar("charts/learning_rate", agent.optimizer._decayed_lr(np.float32), global_step)
-        # tf.summary.scalar("losses/value_loss", value_loss, global_step)
-        # tf.summary.scalar("losses/policy_loss", loss_info.policy_loss, global_step)
-        # tf.summary.scalar("losses/entropy", loss_info.entropy_loss, global_step)
-        # tf.summary.scalar("losses/clipfrac", np.mean(loss_info.clip_fracs), self.global_step)
-        # tf.summary.scalar("losses/explained_variance", explained_var, self.global_step)

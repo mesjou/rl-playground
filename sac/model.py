@@ -26,25 +26,34 @@ class GaussianActor(Model):
         )
 
     @tf.function
-    def call(self, state):
-        x = self.model(state)
-        mean = self.mean(x)
-        log_std = self.log_std(x)
-        log_std_clipped = tf.clip_by_value(log_std, -20, 2)
-        normal_dist = tfp.distributions.Normal(mean, tf.exp(log_std_clipped))
-        action = tf.stop_gradient(normal_dist.sample())
-        squashed_actions = tf.tanh(action)
-        # todo are logprobs calculated correctly?
-        logprob = normal_dist.log_prob(action) - tf.math.log(
-            1.0 - tf.pow(squashed_actions, 2) + 1e-6
-        )  # epsilon for numerical stability
-        logprob = tf.reduce_sum(logprob, axis=-1, keepdims=True)
-        return squashed_actions, logprob
+    def call(self, state, training=True):
+
+        # get mean and std
+        net_out = self.model(state)
+        mean = self.mean(net_out)
+        log_std = self.log_std(net_out)
+        log_std = tf.clip_by_value(log_std, -20, 2)
+        std = tf.exp(log_std)
+
+        # Action sampling and squashing of actions to -1 to 1
+        pi_distribution = tfp.distributions.Normal(mean, std)
+        if training:
+            action = tf.stop_gradient(pi_distribution.sample())
+        else:
+            action = mean
+
+        squashed_action = tf.tanh(action)
+
+        # Get log probabilities
+        logp = pi_distribution.log_prob(action) - tf.math.log(1.0 - tf.pow(squashed_action, 2) + 1e-6)
+        logp = tf.reduce_sum(logp, axis=-1, keepdims=True)
+
+        return squashed_action, logp
 
 
-class QCritic(Model):
+class Critic(Model):
     def __init__(self, hidden_layers: List, state_dim: int, n_actions: int):
-        super(QCritic, self).__init__()
+        super(Critic, self).__init__()
         self.model = Sequential()
         self.model.add(Input(shape=(state_dim + n_actions), dtype=tf.float32))
         for hidden_units in hidden_layers:
@@ -58,6 +67,6 @@ class QCritic(Model):
         )
 
     @tf.function
-    def call(self, states, actions):
-        x = tf.concat([states, actions], 1)
-        return self.model(x)
+    def call(self, state, action):
+        net_out = tf.concat([state, action], 1)
+        return self.model(net_out)

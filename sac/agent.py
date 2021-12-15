@@ -2,10 +2,8 @@ from abc import ABC
 from typing import Sequence
 
 import tensorflow as tf
-from sac.model import GaussianActor, QCritic
-from sac.utils import ReplayBuffer
-
-# todo use mean action for testing -> better results than sampling from distribution
+from sac.model import Critic, GaussianActor
+from sac.utils import ReplayBuffer, TrainingInfo
 
 
 class SACAgent(ABC):
@@ -22,25 +20,24 @@ class SACAgent(ABC):
         # replay buffer and networks
         self.replay_buffer = ReplayBuffer(state_dim=observation_space, n_actions=n_actions, size=self.replay_size)
         self.actor = GaussianActor(hidden_layers=[64, 64], n_actions=n_actions)
-        self.qnetwork_1 = QCritic(hidden_layers=[64, 64], state_dim=observation_space, n_actions=n_actions)
-        self.target_qnetwork_1 = QCritic(hidden_layers=[64, 64], state_dim=observation_space, n_actions=n_actions)
-        self.qnetwork_2 = QCritic(hidden_layers=[64, 64], state_dim=observation_space, n_actions=n_actions)
-        self.target_qnetwork_2 = QCritic(hidden_layers=[64, 64], state_dim=observation_space, n_actions=n_actions)
+        self.qnet1 = Critic(hidden_layers=[64, 64], state_dim=observation_space, n_actions=n_actions)
+        self.qnet1_target = Critic(hidden_layers=[64, 64], state_dim=observation_space, n_actions=n_actions)
+        self.qnet2 = Critic(hidden_layers=[64, 64], state_dim=observation_space, n_actions=n_actions)
+        self.qnet2_target = Critic(hidden_layers=[64, 64], state_dim=observation_space, n_actions=n_actions)
 
         # Optimizers
-        # todo could be replaced by recitified adam (maybe better performance)
-        self.actor_optimizer = tf.optimizers.Adam(learning_rate=self.lr)
-        self.qnetwork_1_optimizer = tf.optimizers.Adam(learning_rate=self.lr)
-        self.qnetwork_2_optimizer = tf.optimizers.Adam(learning_rate=self.lr)
+        self.optimizer_actor = tf.optimizers.Adam(learning_rate=self.lr)
+        self.optimizer_q1 = tf.optimizers.Adam(learning_rate=self.lr)
+        self.optimizer_q2 = tf.optimizers.Adam(learning_rate=self.lr)
 
         # Reset weights of the networks with hard update: polyak=1.0
-        soft_update(self.qnetwork_1.variables, self.target_qnetwork_1.variables, 1.0)
-        soft_update(self.qnetwork_2.variables, self.target_qnetwork_2.variables, 1.0)
+        soft_update(self.qnet1.variables, self.qnet1_target.variables, 1.0)
+        soft_update(self.qnet2.variables, self.qnet2_target.variables, 1.0)
 
     def act(self, obs) -> float:
         """Get the action for a single state."""
 
-        # unpack observation
+        # unpack observation for action masking
         # state = obs["state"]
         # action_mask = obs["action_mask"]
         state = obs
@@ -49,7 +46,7 @@ class SACAgent(ABC):
 
     def learn(self, obs, action, reward, next_obs, done):
 
-        # unpack observation
+        # unpack observation for action masking
         # state = obs["state"]
         # next_state = next_obs["state"]
         # next_action_mask = next_obs["action_mask"]
@@ -60,66 +57,83 @@ class SACAgent(ABC):
 
         # update actor and critic
         # todo should they update at the same time?
-        self.train(
+        log = self.train(
             obs=batch["obs1"], action=batch["acts"], rew=batch["rews"], next_obs=batch["obs2"], done=batch["done"]
         )
+
+        return log
 
     def train(self, obs, action, rew, next_obs, done):
 
         # Computing action and a_tilde
-        next_action, logp = self.actor(next_obs)
+        next_action, next_logp = self.actor(next_obs)
 
         # Taking the minimum of the q-functions values and add entropy
-        value_target_1 = self.target_qnetwork_1(next_obs, action)
-        value_target_2 = self.target_qnetwork_2(next_obs, action)
-        value_target = tf.math.minimum(value_target_1, value_target_2) - self.temperature * logp
+        target_q1 = self.qnet1_target(next_obs, action)
+        target_q2 = self.qnet2_target(next_obs, action)
+        target_q = tf.math.minimum(target_q1, target_q2) - self.temperature * next_logp
 
         # Computing target for q-functions
-        target = rew + self.gamma * (1 - done) * tf.reshape(value_target, [-1])
-        target = tf.reshape(target, [self.batch_size, 1])
+        backup = rew + self.gamma * (1 - done) * tf.reshape(target_q, [-1])
+        backup = tf.reshape(backup, [self.batch_size, 1])
 
         # Gradient descent for the two local critic networks
-        with tf.GradientTape() as q_1_tape:
-            qvalue_1 = self.qnetwork_1(obs, action)
-            loss_1 = tf.reduce_mean(tf.square(qvalue_1 - target))
-        with tf.GradientTape() as q_2_tape:
-            qvalue_2 = self.qnetwork_2(obs, action)
-            loss_2 = tf.reduce_mean(tf.square(qvalue_2 - target))
+        with tf.GradientTape() as tape_q1:
+            q1 = self.qnet1(obs, action)
+            loss_q1 = tf.reduce_mean(tf.square(q1 - backup))
+        with tf.GradientTape() as tape_q2:
+            q2 = self.qnet2(obs, action)
+            loss_q2 = tf.reduce_mean(tf.square(q2 - backup))
 
         # gradient descent for actor
-        # todo deviated from example here
-        with tf.GradientTape() as actor_tape:
+        with tf.GradientTape() as tape_a:
             action, logp = self.actor(obs)
-            qvalue = tf.math.minimum(self.qnetwork_1(obs, action), self.qnetwork_2(obs, action))
-            # loss = tf.reduce_mean(self.temperature * logp - qvalue)
+            q_pi = tf.math.minimum(self.qnet1(obs, action), self.qnet2(obs, action))
 
-            # New actor_loss -> works better
-            advantage = tf.stop_gradient(logp - qvalue)
-            loss = tf.reduce_mean(logp * advantage)
+            # New actor_loss -> works better than: loss = tf.reduce_mean(self.temperature * logp - q_pi)
+            advantage = tf.stop_gradient(logp - q_pi)
+            loss_actor = tf.reduce_mean(logp * advantage)
 
-        # Computing the gradients and applying them
-        actor_gradients = actor_tape.gradient(loss, self.actor.trainable_weights)
-        gradients_1 = q_1_tape.gradient(loss_1, self.qnetwork_1.trainable_weights)
-        gradients_2 = q_2_tape.gradient(loss_2, self.qnetwork_2.trainable_weights)
-        self.qnetwork_1_optimizer.apply_gradients(zip(gradients_1, self.qnetwork_1.trainable_weights))
-        self.qnetwork_2_optimizer.apply_gradients(zip(gradients_2, self.qnetwork_2.trainable_weights))
-        self.actor_optimizer.apply_gradients(zip(actor_gradients, self.actor.trainable_weights))
+        # Computing the gradients
+        gradients_actor = tape_a.gradient(loss_actor, self.actor.trainable_weights)
+        gradients_q1 = tape_q1.gradient(loss_q1, self.qnet1.trainable_weights)
+        gradients_q2 = tape_q2.gradient(loss_q2, self.qnet2.trainable_weights)
+
+        # Backprop
+        self.optimizer_q1.apply_gradients(zip(gradients_q1, self.qnet1.trainable_weights))
+        self.optimizer_q2.apply_gradients(zip(gradients_q2, self.qnet2.trainable_weights))
+        self.optimizer_actor.apply_gradients(zip(gradients_actor, self.actor.trainable_weights))
 
         # Update the weights of the soft q-function target networks
-        soft_update(self.qnetwork_1.variables, self.target_qnetwork_1.variables, self.polyak_coef)
-        soft_update(self.qnetwork_2.variables, self.target_qnetwork_2.variables, self.polyak_coef)
+        soft_update(self.qnet1.variables, self.qnet1_target.variables, self.polyak_coef)
+        soft_update(self.qnet2.variables, self.qnet2_target.variables, self.polyak_coef)
 
-    def set_epsilon(self, epsilon):
-        self.epsilon = epsilon
+        # logging
+        q1_mean, q1_variance = tf.nn.moments(q1, axes=[0])
+        q2_mean, q2_variance = tf.nn.moments(q2, axes=[0])
 
-    def get_epsilon(self):
-        return self.epsilon
+        return TrainingInfo(
+            q1=q1_mean[0],
+            q2=q2_mean[0],
+            q1_var=q1_variance[0],
+            q2_var=q2_variance[0],
+            logp=tf.reduce_mean(logp),
+            loss_actor=loss_actor,
+            loss_q1=loss_q1,
+            loss_q2=loss_q2,
+        )
 
-    def set_learning_rate(self, alpha):
-        self.alpha = alpha
+    def set_learning_rate(self, lr):
+        self.lr = lr
 
     def get_learning_rate(self):
-        return self.alpha
+        return self.lr
+
+    def set_temperature(self, temperature):
+        self.temperature = temperature
+
+    def get_temperature(self):
+        return self.temperature
 
 
 def soft_update(source_vars: Sequence[tf.Variable], target_vars: Sequence[tf.Variable], tau: float) -> None:

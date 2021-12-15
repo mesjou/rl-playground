@@ -1,6 +1,8 @@
 # RL playground
 
-Simple implementation of PPO with TensorFlow 2.0 to solve OpenAI's CartPole-v1.
+Simple implementation of:
+- PPO with TensorFlow 2.0 to solve OpenAI's CartPole-v1
+- SAC with TensorFlow 2.0 to solve OpenAI's MountainCarContinuous-v0
 
 The simplicity makes understanding of PPO straightforward.
 All steps are represented in two files:
@@ -47,7 +49,11 @@ tensorboard --logdir=runs/
 I have been heavily relying on the `cleanrl` repo:
 * https://github.com/vwxyzjn/cleanrl
 
-Additional resources:
+Additional resources for PPO:
 * https://github.com/tensorflow/agents
 * https://github.com/jw1401/PPO-Tensorflow-2.0
 * https://github.com/lilianweng/deep-reinforcement-learning-gym
+
+Additional resources for SAC:
+* https://github.com/RickyMexx/SAC-tf2
+* https://github.com/openai/spinningup

@@ -1,10 +1,13 @@
-# https://github.com/openai/spinningup/blob/master/spinup/algos/tf1/sac/sac.py
+import collections
+
 import numpy as np
 
 
 class ReplayBuffer:
     """
     A simple FIFO experience replay buffer for SAC agents.
+    adopted from https://github.com/openai/spinningup/blob/master/spinup/algos/tf1/sac/sac.py
+
     """
 
     def __init__(self, state_dim, n_actions, size):
@@ -33,3 +36,8 @@ class ReplayBuffer:
             rews=self.rews_buf[idxs],
             done=self.done_buf[idxs],
         )
+
+
+TrainingInfo = collections.namedtuple(
+    "TrainingInfo", ("q1", "q2", "q1_var", "q2_var", "logp", "loss_actor", "loss_q1", "loss_q2",)
+)
