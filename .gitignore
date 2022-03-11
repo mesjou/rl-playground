@@ -135,3 +135,4 @@ dmypy.json
 # Run experiments
 runs/*
 runs
+videos/*

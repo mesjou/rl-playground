@@ -1,4 +1,6 @@
-gym
+gym[all]
 numpy
 tensorboard
-tensorflow
+tensorflow==2.7.0
+tensorflow-addons
+tensorflow-probability
