@@ -1,6 +1,6 @@
 # RL playground
 
-Simple implementation of:
+Implementation of:
 - PPO with TensorFlow 2.0 to solve OpenAI's CartPole-v1
 - SAC with TensorFlow 2.0 to solve OpenAI's MountainCarContinuous-v0
 
