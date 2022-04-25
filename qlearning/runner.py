@@ -4,41 +4,44 @@ import qtablememory
 import gym
 import numpy as np
 
-def qlearning(episodes = 5000, Qtable0 = None, alpha = 0.3 , gamma = 0.9, epsilon = 0.1):
-    ag = agent.QLearnAgent()
+test = agent.QLearnAgent()
+
+def qlearning(episodes = 5000, ag = test, alpha = 0.3 , gamma = 0.9, epsilon = 0.1):
     print('START OF QLEARN')
+    #ag= agent.QLearnAgent()
     rewardlist = []
-    all_reward = 0
+    all_reward, episode_length,l = 0, 0, 0
     for i in range(episodes):# Number of Episodes
         observation = model.env.reset()
         ag.done = False
         ag.discretize_state(observation)
-        av_reward = 0
         if i < episodes * 1/4:
             epsilon2 = 0.7
             #epsilon2 = (epsilon-1)*(4/episodes)* i + 1
         else:
             epsilon2 = epsilon
         while not ag.done:  # one episode
+            episode_length +=1
             ag.act(epsilon2)
-            ag.learn(alpha, gamma, epsilon2)
+            ag.learn(alpha, gamma,l)
             if i > episodes - 10:
+                l=1
                 model.env.render()
             if ag.reward != None:
                 all_reward += ag.reward
                 if ag.reward not in rewardlist:
                     rewardlist.append(ag.reward)
         if i%100 == 0 and i>0:
-            print('Average Reward in', (i-100,i), 'is', all_reward/100)
-            all_reward = 0
-    print('Average Reward in', (i - 100, i), 'is', all_reward / 99)
+            print('Average Episode Length in', (i - 100, i), 'is', episode_length / 100)
+            #print('Average Reward in', (i-100,i), 'is', all_reward/100)
+            all_reward, episode_length= 0 ,0
     #print(ag.qtable)
     #print(rewardlist)
     return ag.qtable
 
 
 
-Q = qlearning(5000)
+#Q = qlearning(10000)
 
 """
         observation = model.env.reset()
