@@ -32,12 +32,12 @@ class QLearnAgent():
                 oldstate = self.obs
                 oldq = self.qtable[oldstate[0]][oldstate[1]][self.action]
                 observation, self.reward, self.done, info = model.env.step(self.action)# step, action decided by act()
-                if self.done and observation[0] >= 0.5:#terminal state
-                    self.discretize_state(observation)
-                    newq = oldq + round(( alpha * (- oldq)), 4)#in terminal state reward is zero and qtable value is initialized zero
-                else:
-                    self.discretize_state(observation)
-                    newq = oldq + round(( alpha * (self.reward + gamma * np.max(self.qtable[self.obs[0]][self.obs[1]]) - oldq)), 4)
+                #if self.done and observation[0] >= 0.5:#terminal state
+                #    self.discretize_state(observation)
+                #    newq = oldq + round(( alpha * (- oldq)), 4)#in terminal state reward is zero and qtable value is initialized zero
+                #else:
+                self.discretize_state(observation)
+                newq = oldq + round(( alpha * (self.reward + gamma * np.max(self.qtable[self.obs[0]][self.obs[1]]) - oldq)), 4)
                 self.qtable[oldstate[0]][oldstate[1]][self.action] = newq
 
     def discretize_state(self, observation, numbervelo = 15,numberpos = 20):#from another project

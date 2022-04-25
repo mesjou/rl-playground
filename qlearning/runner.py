@@ -16,6 +16,7 @@ def qlearning(episodes = 5000, Qtable0 = None, alpha = 0.3 , gamma = 0.9, epsilo
         av_reward = 0
         if i < episodes * 1/4:
             epsilon2 = 0.7
+            #epsilon2 = (epsilon-1)*(4/episodes)* i + 1
         else:
             epsilon2 = epsilon
         while not ag.done:  # one episode
@@ -30,14 +31,14 @@ def qlearning(episodes = 5000, Qtable0 = None, alpha = 0.3 , gamma = 0.9, epsilo
         if i%100 == 0 and i>0:
             print('Average Reward in', (i-100,i), 'is', all_reward/100)
             all_reward = 0
-    print('Average Reward in', (i - 100, i), 'is', all_reward / 100)
-    print(ag.qtable)
-    print(rewardlist)
+    print('Average Reward in', (i - 100, i), 'is', all_reward / 99)
+    #print(ag.qtable)
+    #print(rewardlist)
     return ag.qtable
 
 
 
-Q = qlearning(2000)
+Q = qlearning(5000)
 
 """
         observation = model.env.reset()
