@@ -4,20 +4,21 @@ import numpy as np
 
 
 class QLearnAgent():
-    def __init__(self, obs = [0,0], action = None, reward = None, numberactions = 3, numberpos = 20, numbervelo = 15):
+    def __init__(self, obs = [0,0], action = None, reward = None, numberactions = 3, numberpos = 50, numbervelo = 20):
             self.obs= obs
             self.action = action
             self.reward = reward
             self.numberactions = numberactions
             self.done = False
-            num_states = (model.env.observation_space.high - model.env.observation_space.low) * \
-                         np.array([10, 100])# diskretize from another programm
-            num_states = np.round(num_states, 0).astype(int) + 1
-            print(num_states)
+            #num_states = (model.env.observation_space.high - model.env.observation_space.low) * \
+            #             np.array([10, 100])# diskretize from another programm
+            self.num_states = [numberpos+1, numbervelo+1]
+            #num_states = np.round(num_states, 0).astype(int) + 1
+            print(self.num_states)
             self.qtable = np.random.uniform(low=-1, high=1,
-                                  size=(num_states[0], num_states[1],
+                                  size=(self.num_states[0], self.num_states[1],
                                         model.env.action_space.n))
-            self.qtable[num_states[0]-1] = np.array([[0 for i in range(model.env.action_space.n)] for j in range(num_states[1])])#terminal state should have value zero
+            self.qtable[self.num_states[0]-1] = np.array([[0 for i in range(model.env.action_space.n)] for j in range(self.num_states[1])])#terminal state should have value zero
             #self.qtable = np.array([[[ 0.5 for k in range(numberactions)] for j in range(numbervelo)] for i in range(numberpos)], float)
             #self.qtable = np.random.uniform(low=-1, high=1,size=(numberpos, numbervelo, numberactions))
             #self.qtable = [[[ None for k in range(numbervelo)] for j in range(numberpos)] for i in [0,1,2]] hier Actions außerhalb, für Vergleich effizienter innerhalb
@@ -28,7 +29,7 @@ class QLearnAgent():
         else:
             self.action = np.random.choice(self.numberactions)  # take a random action
 
-    def learn(self, alpha = 0.2, gamma = 0.9, epsilon = 0.1):#qlearning
+    def learn(self, alpha = 0.2, gamma = 0.9,k=0):#qlearning
                 oldstate = self.obs
                 oldq = self.qtable[oldstate[0]][oldstate[1]][self.action]
                 observation, self.reward, self.done, info = model.env.step(self.action)# step, action decided by act()
@@ -39,10 +40,13 @@ class QLearnAgent():
                 self.discretize_state(observation)
                 newq = oldq + round(( alpha * (self.reward + gamma * np.max(self.qtable[self.obs[0]][self.obs[1]]) - oldq)), 4)
                 self.qtable[oldstate[0]][oldstate[1]][self.action] = newq
+                if k==1:
+                    print('Oldq is', oldq, 'Newq is', newq, 'at position', [oldstate[0],oldstate[1],self.action,self.obs[0],self.obs[1]])
 
-    def discretize_state(self, observation, numbervelo = 15,numberpos = 20):#from another project
-        state_adj = (observation - model.env.observation_space.low) * np.array([10, 100])
-        self.obs = np.round(state_adj, 0).astype(int)
+    def discretize_state(self, observation):#from another project
+        state_adj = (observation - model.env.observation_space.low) * (self.num_states/np.array([model.env.observation_space.high-model.env.observation_space.low]))
+        self.obs = np.round(state_adj, 0).astype(int)[0]
+        #print(self.obs)
 
 
 
