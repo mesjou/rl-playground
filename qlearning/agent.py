@@ -4,7 +4,7 @@ import numpy as np
 
 
 class QLearnAgent():
-    def __init__(self, obs = [0,0], action = None, reward = None, numberactions = 3, numberpos = 50, numbervelo = 20):
+    def __init__(self, obs = [0,0], action = None, reward = None, numberactions = 3, numberpos = 50, numbervelo = 10):
             self.obs= obs
             self.action = action
             self.reward = reward
@@ -23,13 +23,23 @@ class QLearnAgent():
             #self.qtable = np.random.uniform(low=-1, high=1,size=(numberpos, numbervelo, numberactions))
             #self.qtable = [[[ None for k in range(numbervelo)] for j in range(numberpos)] for i in [0,1,2]] hier Actions außerhalb, für Vergleich effizienter innerhalb
 
+    def maxaction(self):  # if there are actions with equal values a random action of those will be choosen
+        smallq = self.qtable[self.obs[0]][self.obs[1]]
+        listmaxactions = np.argwhere(smallq == np.amax(smallq))
+        if len(listmaxactions) == 1:
+            return listmaxactions[0][0]
+        else:
+            listmaxactions2 = np.array([ob[0] for ob in listmaxactions])
+            return np.random.choice(listmaxactions2)
+
     def act(self,epsilon = 0.3):# epsilon greedy policy
         if np.random.random() > epsilon:
-            self.action = np.argmax(self.qtable[self.obs[0]][self.obs[1]])
+            self.action = self.maxaction()
+            #self.action = np.argmax(self.qtable[self.obs[0]][self.obs[1]])
         else:
             self.action = np.random.choice(self.numberactions)  # take a random action
 
-    def learn(self, alpha = 0.2, gamma = 0.9,k=0):#qlearning
+    def learn(self, alpha = 0.8, gamma = 0.9,k=0):#qlearning
                 oldstate = self.obs
                 oldq = self.qtable[oldstate[0]][oldstate[1]][self.action]
                 observation, self.reward, self.done, info = model.env.step(self.action)# step, action decided by act()
@@ -38,7 +48,7 @@ class QLearnAgent():
                 #    newq = oldq + round(( alpha * (- oldq)), 4)#in terminal state reward is zero and qtable value is initialized zero
                 #else:
                 self.discretize_state(observation)
-                newq = oldq + round(( alpha * (self.reward + gamma * np.max(self.qtable[self.obs[0]][self.obs[1]]) - oldq)), 4)
+                newq = round(oldq + ( alpha * (self.reward + gamma * np.max(self.qtable[self.obs[0]][self.obs[1]]) - oldq)), 4)
                 self.qtable[oldstate[0]][oldstate[1]][self.action] = newq
                 if k==1:
                     print('Oldq is', oldq, 'Newq is', newq, 'at position', [oldstate[0],oldstate[1],self.action,self.obs[0],self.obs[1]])
@@ -47,6 +57,7 @@ class QLearnAgent():
         state_adj = (observation - model.env.observation_space.low) * (self.num_states/np.array([model.env.observation_space.high-model.env.observation_space.low]))
         self.obs = np.round(state_adj, 0).astype(int)[0]
         #print(self.obs)
+
 
 
 
