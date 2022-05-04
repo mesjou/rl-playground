@@ -4,7 +4,7 @@ import numpy as np
 
 
 class QLearnAgent():
-    def __init__(self, obs = [0,0], action = None, reward = None, numberactions = 3, numberpos = 50, numbervelo = 10):
+    def __init__(self, obs = [0,0], action = None, reward = None, numberactions = 3, numberpos = 30, numbervelo = 10):
             self.obs= obs
             self.action = action
             self.reward = reward
@@ -50,13 +50,14 @@ class QLearnAgent():
                 self.discretize_state(observation)
                 newq = round(oldq + ( alpha * (self.reward + gamma * np.max(self.qtable[self.obs[0]][self.obs[1]]) - oldq)), 4)
                 self.qtable[oldstate[0]][oldstate[1]][self.action] = newq
-                if k==1:
-                    print('Oldq is', oldq, 'Newq is', newq, 'at position', [oldstate[0],oldstate[1],self.action,self.obs[0],self.obs[1]])
+                #if k==1:
+                #    print('Oldq is', oldq, 'Newq is', newq, 'at position', [oldstate[0],oldstate[1],self.action,self.obs[0],self.obs[1]])
 
     def discretize_state(self, observation):#from another project
         state_adj = (observation - model.env.observation_space.low) * (self.num_states/np.array([model.env.observation_space.high-model.env.observation_space.low]))
         self.obs = np.round(state_adj, 0).astype(int)[0]
         #print(self.obs)
+
 
 
 
