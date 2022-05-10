@@ -3,7 +3,7 @@ import numpy as np
 
 
 class QLearnAgent():
-    def __init__(self, obs = [0,0], action = None, reward = None, numberactions = 3, num_states = [30,10]):
+    def __init__(self, obs = [0,0], action = None, reward = None, numberactions = 3, num_states = [31,11]):
             self.obs= obs
             self.action = action
             self.reward = reward
@@ -27,8 +27,8 @@ class QLearnAgent():
 
     def act(self,obs,epsilon = 0.3):# epsilon greedy policy
         if np.random.random() > epsilon:
-            #self.action = self.maxaction(obs)
-            self.action = np.argmax(self.qtable[obs[0]][obs[1]])
+            self.action = self.maxaction(obs)
+            #self.action = np.argmax(self.qtable[obs[0]][obs[1]])
         else:
             self.action = np.random.choice(self.numberactions)  # take a random action
         return self.action
