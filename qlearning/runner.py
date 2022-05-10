@@ -28,12 +28,13 @@ def qlearning(episodes = 5000, minep = 4000, alpha = 0.3 , gamma = 0.9, epsilon 
         epsilon2 = 0
 
         # decrease learning rate alpha
-        if i < minep:
-            alpha2 = 0.3
+        if i <= minep:
+            alpha2 = alpha
             # alpha2 = (alpha-1)*(1/minep)* i + 1
+        #elif minep < i < 2 * minep:
+        #    alpha2 = (alpha - 1) * (1 / (2 * minep)) * i + 1
         else:
             alpha2 = 0.01
-
 
         while not done:  # one episode
             episode_length +=1
@@ -52,6 +53,7 @@ def qlearning(episodes = 5000, minep = 4000, alpha = 0.3 , gamma = 0.9, epsilon 
             total_episode_length, finished_episodes= 0 ,0
         episode_length = 0
     model.env.close()
+    return ag.qtable
 
 
 #Q = qlearning(20000,1000)
