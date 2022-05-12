@@ -1,50 +1,73 @@
-import agent
+import time
+from typing import Tuple
+
 import gym
-import numpy as np
-from wrapper import ObservationDiscretizer
 
-n_states = (50,20)
-env = gym.make('MountainCar-v0')
-env = ObservationDiscretizer(env,n_states)
+from qlearning.wrapper import ObservationDiscretizer
 
 
+class GymRunner:
+    def __init__(self, env_id: str, seed: int, n_states: Tuple = (50, 20)):
+        self.run_name = f"{env_id}__{seed}__{int(time.time())}"
 
+        # env storage
+        self.env = gym.make(env_id)
+        self.env = ObservationDiscretizer(self.env, n_states)
+        self.env.seed(seed)
 
-def qlearning(episodes = 12000, minep = 1000, alpha = 0.3, n_states = None , gamma = 0.9, epsilon = 0):
-    if n_states is None:
-        n_states = (50, 20)
-    ag = agent.QLearnAgent(env.action_space.n, n_states)
-    ag.qtable[- 1] = np.array([[0 for i in range(ag.n_actions)] for j in range(ag.n_states[1])])
-    all_reward, episode_length,l, total_episode_length, finished_episodes = 0, 0, 0, 0,0
-    for i in range(episodes):# Number of Episodes
-        state = env.reset()
-        done = False
+        # hyperparameters
+        self.n_states = n_states
+        self.episodes = 12000  # the number of total epochs for learning
+        self.start_steps = 1000  # after how many random steps should alpha decrease
+        self.alpha_schedule = [0.3, 0.01, 0.001]
+        self.epsilon = 0.0
+        self.gamma = 0.9
 
-        # decrease learning rate alpha
-        if i <= minep:
-            alpha2 = alpha
-        elif minep < i < 6 * minep:
-            alpha2 = 0.01
-        else:
-            alpha2 = 0.001
+    def obs_shape(self) -> Tuple:
+        return self.n_states
 
-        while not done:  # one episode
-            episode_length +=1
-            action = ag.act(state,epsilon)
-            next_state, reward, done, info = env.step(action)
-            ag.learn(action, reward, state, next_state, done, alpha2, gamma)
-            state = next_state
-            if i > episodes - 5:
-                env.render()
+    def n_actions(self) -> int:
+        return self.env.action_space.n
 
-        total_episode_length += episode_length
-        if episode_length < 200:
-            finished_episodes +=1
-        if (i%1000 == 0 and i>0) or i+1 == episodes:
-            print('In the Episodes', i - 999,'to', i ,'a total of', finished_episodes,
-                  'Episodes were finished successfully and Average Episode Length is',
-                  total_episode_length/1000)
-            total_episode_length, finished_episodes= 0 ,0
-        episode_length = 0
-    env.close()
-    return ag.qtable
+    def run(self, agent):
+
+        # metric storage
+        all_reward, episode_length, l, total_episode_length, finished_episodes = 0, 0, 0, 0, 0
+
+        for i in range(self.episodes):  # Number of Episodes
+            state = self.env.reset()
+            done = False
+
+            # decrease learning rate alpha
+            if i <= self.start_steps:
+                alpha = self.alpha_schedule[0]
+            elif self.start_steps < i < 6 * self.start_steps:
+                alpha = self.alpha_schedule[1]
+            else:
+                alpha = self.alpha_schedule[2]
+
+            while not done:  # one episode
+                episode_length += 1
+
+                action = agent.act(state, self.epsilon)
+                next_state, reward, done, info = self.env.step(action)
+                agent.learn(action, reward, state, next_state, done, alpha, self.gamma)
+                state = next_state
+
+                # show learned policy at the end
+                if i > self.episodes - 5:
+                    self.env.render()
+
+            total_episode_length += episode_length
+
+            if episode_length < 200:
+                finished_episodes += 1
+
+            if (i % 1000 == 0 and i > 0) or i + 1 == self.episodes:
+                print('In the Episodes', i - 999, 'to', i, 'a total of', finished_episodes,
+                      'Episodes were finished successfully and Average Episode Length is',
+                      total_episode_length / 1000)
+                total_episode_length, finished_episodes = 0, 0
+            episode_length = 0
+        self.env.close()
+        return agent.qtable

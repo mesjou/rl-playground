@@ -7,9 +7,9 @@ class QLearnAgent():
     def __init__(self, n_actions: int, n_states: Tuple):
         self.n_actions = n_actions
         self.n_states = n_states
-        self.qtable = np.random.uniform(low=-1, high=1, size = self.n_states + (self.n_actions,) )
+        self.qtable = np.random.uniform(low=-1, high=1, size=self.n_states + (self.n_actions,))
 
-    def maxaction(self, next_state: np.array) -> int:
+    def get_max_action(self, next_state: np.array) -> int:
         """return action with highest q-value. If values equal choose randomly."""
         tuple_next_state = tuple(obj for obj in next_state)
         smallq = self.qtable[tuple_next_state]
@@ -23,12 +23,11 @@ class QLearnAgent():
     def act(self, next_state: np.array, epsilon: float = 0) -> int:
         """epsilon greedy policy"""
         if np.random.random() > epsilon:
-            self.action = self.maxaction(next_state)
+            return self.get_max_action(next_state)
         else:
-            self.action = np.random.choice(self.n_actions)  # take a random action
-        return self.action
+            return np.random.choice(self.n_actions)  # take a random action
 
-    def learn(self, action, reward, state, next_state, done, alpha = 0.8, gamma: float = 0.9):
+    def learn(self, action, reward, state, next_state, done, alpha: float = 0.8, gamma: float = 0.9):
         """update policy via q-learning"""
         oldq = self.qtable[state[0]][state[1]][action]
         newq = round(oldq + (alpha * (1.0 - done) * (reward + gamma * np.max(self.qtable[next_state[0]][next_state[1]]) - oldq)), 4)
