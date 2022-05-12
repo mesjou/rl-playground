@@ -1,6 +1,7 @@
 # RL playground
 
 Implementation of:
+- Q-learning to solve OpenAI's MMountainCar-v0
 - PPO with TensorFlow 2.0 to solve OpenAI's CartPole-v1
 - SAC with TensorFlow 2.0 to solve OpenAI's MountainCarContinuous-v0
 
@@ -43,6 +44,7 @@ tensorboard --logdir=runs/
 ## Authors
 
 - [mesjou](https://github.com/mesjou)
+- [ln343](https://github.com/ln343)
 
 ## References
 
