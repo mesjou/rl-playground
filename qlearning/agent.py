@@ -11,14 +11,12 @@ class QLearnAgent():
 
     def get_max_action(self, next_state: np.array) -> int:
         """return action with highest q-value. If values equal choose randomly."""
-        tuple_next_state = tuple(obj for obj in next_state)
-        smallq = self.qtable[tuple_next_state]
+        smallq = self.qtable[tuple(next_state)]
         listmaxactions = np.argwhere(smallq == np.amax(smallq))
         if len(listmaxactions) == 1:
             return listmaxactions[0][0]
         else:
-            listmaxactions2 = np.array([ob[0] for ob in listmaxactions])
-            return np.random.choice(listmaxactions2)
+            return np.random.choice(listmaxactions.flatten())
 
     def act(self, next_state: np.array, epsilon: float = 0) -> int:
         """epsilon greedy policy"""
@@ -29,6 +27,6 @@ class QLearnAgent():
 
     def learn(self, action, reward, state, next_state, done, alpha: float = 0.8, gamma: float = 0.9):
         """update policy via q-learning"""
-        oldq = self.qtable[state[0]][state[1]][action]
-        newq = round(oldq + (alpha * (1.0 - done) * (reward + gamma * np.max(self.qtable[next_state[0]][next_state[1]]) - oldq)), 4)
-        self.qtable[state[0]][state[1]][action] = newq
+        oldq = self.qtable[tuple(state)][action]
+        newq = round(oldq + (alpha * (1.0 - done) * (reward + gamma * np.max(self.qtable[tuple(next_state)]) - oldq)), 4)
+        self.qtable[tuple(state)][action] = newq
