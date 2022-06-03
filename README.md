@@ -2,8 +2,8 @@
 
 Implementation of:
 - Q-learning to solve OpenAI's MountainCar-v0
-- PPO with TensorFlow 2.0 to solve OpenAI's CartPole-v1
-- SAC with TensorFlow 2.0 to solve OpenAI's MountainCarContinuous-v0
+- PPO with TensorFlow 2.7 to solve OpenAI's CartPole-v1
+- SAC with TensorFlow 2.7 to solve OpenAI's MountainCarContinuous-v0
 
 The simplicity makes understanding of PPO straightforward.
 All steps are represented in two files:
